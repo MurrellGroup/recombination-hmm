@@ -144,7 +144,7 @@ def posterior_decode(obs, S, A, E):
     return np.argmax(p, axis=0)
 
 
-def get_start(A, E):
+def get_start(A):
     vals, vecs = scipy.linalg.eig(A, left=True, right=False)
     idx = np.argmax(vals)
     S = vecs[:, idx]
@@ -153,6 +153,7 @@ def get_start(A, E):
 
 
 def baumwelch_train(observations, S, A, E):
+    """Unconstrained Baum-Welch"""
     while True:
         # implicit pseudocount of 1
         A_new = np.zeros_like(A)
@@ -178,7 +179,7 @@ def baumwelch_train(observations, S, A, E):
         E_new = np.exp(A_new)
         A_new = A_new / A_new.sum(axis=1).reshape((-1, 1))
         E_new = E_new / E_new.sum(axis=1).reshape((-1, 1))
-        S = get_start(A_new, E_new)
+        S = get_start(A_new)
         if np.allclose(A_new, A) and np.allclose(E_new, E):
             break
         A = A_new
@@ -187,19 +188,28 @@ def baumwelch_train(observations, S, A, E):
 
 
 def estimate_from_paths(paths, observations, n_states, n_symbols):
-    A = np.zeros((n_states, n_states)) + 1  # pseudocount
-    E = np.zeros((n_states, n_symbols)) + 1  # pseudocount
+    """A single iteration of Viterbi training.
+
+    Constrains transition matrix to be symmetric with a constant diagonal
+
+    """
+    pseudocount = 0.1
+    a = 0  # count transitions to same state
+    E = np.zeros((n_states, n_symbols)) + pseudocount
     for path, obs in zip(paths, observations):
         E[path[0], obs[0]] += 1
         for i in range(1, len(path)):
             source, sink = path[i - 1], path[i]
-            A[source, sink] += 1
+            if source == sink:
+                a += 1
             E[sink, obs[i]] += 1
-    # normalize A and E
-    A = A / A.sum(axis=1).reshape((-1, 1))
+    # convert to probability
+    a = a / (pseudocount + sum(len(p) - 1 for p in paths))
+    A = np.array([[a, 1 - a],
+                  [1 - a, a]])
     E = E / E.sum(axis=1).reshape((-1, 1))
     # set start probabilities to equilibrium distribution
-    S = get_start(A, E)
+    S = get_start(A)
     return S, A, E
 
 
