@@ -5,12 +5,8 @@
 Input: a FASTA file containing aligned sequences. The first two are
 the parents, and the rest are children.
 
-Output: a text file with one line per child, in order. Each
-position in that sequence is assigned a space-seperated code.
-
-  0 = parent 0
-  1 = parent 1
-  - = gap in all three
+Output: Probability that each position came from the second
+parent. Gaps are coded as -1.
 
 Usage:
   find_recombination.py [options] <infile> <outfile>
@@ -330,7 +326,7 @@ if __name__ == "__main__":
     results = np.ma.vstack(list(find_recombination(p1, p2, c) for c in children))
 
     outfile = args["<outfile>"]
-    np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f")
+    np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f", delimiter=",")
 
     cmap = plot.cm.get_cmap('jet')
     cmap.set_bad('grey')
