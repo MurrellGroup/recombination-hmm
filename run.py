@@ -1,8 +1,17 @@
 #!/usr/bin/env python
 
-"""
+"""Input: a FASTA file containing aligned sequences. The first two are
+the parents, and the rest are children.
+
+Output: a text file with one line per sequence, in order. Each
+position in that sequence is assigned a space-seperated code.
+
+  0 = parent 0
+  1 = parent 1
+  - = gap
+
 Usage:
-  run.py [options] <infile>
+  run.py [options] <infile> <outfile>
   run.py -h | --help
 
 Options:
@@ -265,31 +274,44 @@ def run(p1, p2, child):
     probs = np.exp(posterior_logprobs(observation, S, A, E))
 
     # probability that position came from parent 1
-    p1probs = np.zeros(len(child))
+    result = np.zeros(len(child))
 
     # fill first part
-    p1probs[:positions[0]] = probs[0, 0]
+    result[:positions[0]] = probs[0, 0]
 
     # interpolate
     for i in range(len(positions) - 1):
         pos1 = positions[i]
         pos2 = positions[i + 1]
         # interpolate probs[0, i] to probs[0, i + 1]
-        p1probs[pos1:pos2 + 1] = np.linspace(probs[0, i],
+        result[pos1:pos2 + 1] = np.linspace(probs[0, i],
                                              probs[0, i + 1],
                                              pos2 - pos1 + 1)
     # fill last part
-    p1probs[positions[-1]:] = probs[0, -1]
-    # TODO: insert gaps if shared by all three
+    result[positions[-1]:] = probs[0, -1]
 
-    # hard assignments
-    return p1probs
+    # hard assignment
+    result = (result > 0.5).astype(np.int)
+
+    # insert gaps if shared by all three
+    for i, (a, b, c) in enumerate(zip(p1, p2, child)):
+        if a == b == c == "-":
+            result[i] = -1
+
+    return result
 
 
 if __name__ == "__main__":
     args = docopt(__doc__)
     filename = args["<infile>"]
-    reads = SeqIO.parse(filename, 'fasta')
+    reads = list(SeqIO.parse(filename, 'fasta'))
     p1 = reads[0]
     p2 = reads[1]
     children = reads[2:]
+
+    results = list(run(p1, p2, c) for c in children)
+    outfile = args["<outfile>"]
+    with open(outfile, 'w') as h:
+        for r in results:
+            h.write(' '.join(map(lambda s: '-' if s < 0 else str(s), r)))
+            h.write('\n')
