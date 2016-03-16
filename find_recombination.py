@@ -1,22 +1,23 @@
 #!/usr/bin/env python
 
-"""Input: a FASTA file containing aligned sequences. The first two are
+"""Infer recombination from two parent sequences to one child.
+
+Input: a FASTA file containing aligned sequences. The first two are
 the parents, and the rest are children.
 
-Output: a text file with one line per sequence, in order. Each
+Output: a text file with one line per child, in order. Each
 position in that sequence is assigned a space-seperated code.
 
   0 = parent 0
   1 = parent 1
-  - = gap
+  - = gap in all three
 
 Usage:
-  run.py [options] <infile> <outfile>
-  run.py -h | --help
+  find_recombination.py [options] <infile> <outfile>
+  find_recombination.py -h | --help
 
 Options:
-  -v --verbose            Print progress to STDERR
-  -h --help               Show this screen
+  -h --help  Show this screen
 
 """
 
@@ -57,8 +58,6 @@ def _check_matrices(obs, S, A, E):
                         ' {}'.format(np.max(obs)))
 
 
-
-# copied from flea_pipeline/trim.py
 def viterbi_decode(obs, S, A, E):
     """Viterbi algorithm.
 
@@ -79,12 +78,7 @@ def viterbi_decode(obs, S, A, E):
         logstart = np.log(S)
         logemission = np.log(E)
 
-    # heavily adapted from:
-    # http://phvu.net/2013/12/06/sweet-implementation-of-viterbi-in-python/
-
-    # dynamic programming matrix
     trellis = np.zeros((n_states, len(obs)))
-    # back pointers
     backpt = np.ones((n_states, len(obs)), np.int) * -1
 
     trellis[:, 0] = logstart + logemission[:, obs[0]]
@@ -154,6 +148,7 @@ def posterior_decode(obs, S, A, E):
 
 
 def get_start(A):
+    """Stationary distribution of A"""
     vals, vecs = scipy.linalg.eig(A, left=True, right=False)
     idx = np.argmax(vals)
     S = vecs[:, idx]
@@ -245,10 +240,14 @@ def viterbi_train(observations, S, A, E, max_iters=100):
 
 
 def preprocess(p1, p2, child):
-    """
+    """Keep child positions that match exactly one parent.
+
+    Returns:
+      * observation: array of 0s (for parent 1) and 1s (for parent 2)
+      * positions: indices of the observations in the full sequence
 
     >>> preprocess("AAT", "TAG", "TAT")
-    [1, 0]
+    [1, 0], [0, 2]
 
     """
     observation = []
@@ -260,7 +259,17 @@ def preprocess(p1, p2, child):
     return observation, positions
 
 
-def run(p1, p2, child):
+def find_recombination(p1, p2, child):
+    """Run the model on a child sequence.
+
+    Extracts relevent positions, trains a model using Viterbi
+    training, uses posterior probabilities to interpolate results
+    between those positions, and does a hard assignment for each
+    position.
+
+    Gaps in all three sequences are coded as -1.
+
+    """
     observation, positions = preprocess(p1, p2, child)
     S = np.array([0.5, 0.5])
     A = np.array([[0.9, 0.1],
@@ -309,7 +318,7 @@ if __name__ == "__main__":
     p2 = reads[1]
     children = reads[2:]
 
-    results = list(run(p1, p2, c) for c in children)
+    results = list(find_recombination(p1, p2, c) for c in children)
     outfile = args["<outfile>"]
     with open(outfile, 'w') as h:
         for r in results:
