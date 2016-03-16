@@ -327,16 +327,10 @@ if __name__ == "__main__":
     p2 = reads[1]
     children = reads[2:]
 
-    results = list(find_recombination(p1, p2, c) for c in children)
+    results = np.ma.vstack(list(find_recombination(p1, p2, c) for c in children))
+
     outfile = args["<outfile>"]
-
-    outtxt = "{}.txt".format(outfile)
-    with open(outtxt, 'w') as h:
-        for r in results:
-            h.write(' '.join(map(lambda s: '-' if s < 0 else str(s), r)))
-            h.write('\n')
-
-    results = np.ma.vstack(results)
+    np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f")
 
     cmap = plot.cm.get_cmap('jet')
     cmap.set_bad('grey')
