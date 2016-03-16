@@ -28,6 +28,7 @@ from docopt import docopt
 import scipy.linalg
 from scipy.misc import logsumexp
 import numpy as np
+from matplotlib import pyplot as plot
 
 
 def _check_matrices(obs, S, A, E):
@@ -246,17 +247,28 @@ def preprocess(p1, p2, child):
       * observation: array of 0s (for parent 1) and 1s (for parent 2)
       * positions: indices of the observations in the full sequence
 
-    >>> preprocess("AAT", "TAG", "TAT")
-    [1, 0], [0, 2]
+    >>> preprocess("AAT", "tag", "TAT")
+    ([1, 0], [0, 2])
 
     """
+    p1 = p1.upper()
+    p2 = p2.upper()
+    child = child.upper()
     observation = []
     positions = []
-    for i, (a, b, c) in enumerate(zip(p1.seq, p2.seq, child.seq)):
+    for i, (a, b, c) in enumerate(zip(p1, p2, child)):
         if ((c == a) or (c == b)) and (a != b):
             observation.append(0 if c == a else 1)
             positions.append(i)
     return observation, positions
+
+
+def map_obs(p1, p2, child):
+    obs, pos = preprocess(p1, p2, child)
+    result = np.zeros(len(child)) - 1
+    for o, i in zip(obs, pos):
+        result[i] = o
+    return np.ma.masked_equal(result, -1)
 
 
 def find_recombination(p1, p2, child):
@@ -270,7 +282,7 @@ def find_recombination(p1, p2, child):
     Gaps in all three sequences are coded as -1.
 
     """
-    observation, positions = preprocess(p1, p2, child)
+    observation, positions = preprocess(p1.seq, p2.seq, child.seq)
     S = np.array([0.5, 0.5])
     A = np.array([[0.9, 0.1],
                   [0.1, 0.9]])
@@ -286,28 +298,25 @@ def find_recombination(p1, p2, child):
     result = np.zeros(len(child))
 
     # fill first part
-    result[:positions[0]] = probs[0, 0]
+    result[:positions[0]] = probs[1, 0]
 
     # interpolate
     for i in range(len(positions) - 1):
         pos1 = positions[i]
         pos2 = positions[i + 1]
         # interpolate probs[0, i] to probs[0, i + 1]
-        result[pos1:pos2 + 1] = np.linspace(probs[0, i],
-                                             probs[0, i + 1],
+        result[pos1:pos2 + 1] = np.linspace(probs[1, i],
+                                             probs[1, i + 1],
                                              pos2 - pos1 + 1)
     # fill last part
-    result[positions[-1]:] = probs[0, -1]
-
-    # hard assignment
-    result = (result > 0.5).astype(np.int)
+    result[positions[-1]:] = probs[1, -1]
 
     # insert gaps if shared by all three
     for i, (a, b, c) in enumerate(zip(p1, p2, child)):
         if a == b == c == "-":
             result[i] = -1
 
-    return result
+    return np.ma.masked_equal(result, -1)
 
 
 if __name__ == "__main__":
@@ -320,7 +329,25 @@ if __name__ == "__main__":
 
     results = list(find_recombination(p1, p2, c) for c in children)
     outfile = args["<outfile>"]
-    with open(outfile, 'w') as h:
+
+    outtxt = "{}.txt".format(outfile)
+    with open(outtxt, 'w') as h:
         for r in results:
             h.write(' '.join(map(lambda s: '-' if s < 0 else str(s), r)))
             h.write('\n')
+
+    results = np.ma.vstack(results)
+
+    cmap = plot.cm.get_cmap('jet')
+    cmap.set_bad('grey')
+    plot.imsave("{}-probs.png".format(outfile), results, cmap=cmap)
+
+    cmap2 = plot.cm.get_cmap('jet', 2)
+    cmap2.set_bad('grey')
+
+    # hard assignment
+    hard_results = (results > 0.5).astype(np.int)
+    plot.imsave("{}-hard.png".format(outfile), hard_results, cmap=cmap2)
+
+    all_obs = np.ma.vstack(list(map_obs(p1, p2, c) for c in children))
+    plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
