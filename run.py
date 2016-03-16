@@ -243,13 +243,16 @@ def preprocess(p1, p2, child):
 
     """
     observation = []
-    for a, b, c in zip(p1.seq, p2.seq, child.seq):
+    positions = []
+    for i, (a, b, c) in enumerate(zip(p1.seq, p2.seq, child.seq)):
         if ((c == a) or (c == b)) and (a != b):
             observation.append(0 if c == a else 1)
-    return observation
+            positions.append(i)
+    return observation, positions
 
 
-def run(observation):
+def run(p1, p2, child):
+    observation, positions = preprocess(p1, p2, child)
     S = np.array([0.5, 0.5])
     A = np.array([[0.9, 0.1],
                   [0.1, 0.9]])
@@ -259,8 +262,28 @@ def run(observation):
                             S,
                             A,
                             E)
-    path = posterior_decode(observation, S, A, E)
-    return path, S, A, E
+    probs = np.exp(posterior_logprobs(observation, S, A, E))
+
+    # probability that position came from parent 1
+    p1probs = np.zeros(len(child))
+
+    # fill first part
+    p1probs[:positions[0]] = probs[0, 0]
+
+    # interpolate
+    for i in range(len(positions) - 1):
+        pos1 = positions[i]
+        pos2 = positions[i + 1]
+        # interpolate probs[0, i] to probs[0, i + 1]
+        p1probs[pos1:pos2 + 1] = np.linspace(probs[0, i],
+                                             probs[0, i + 1],
+                                             pos2 - pos1 + 1)
+    # fill last part
+    p1probs[positions[-1]:] = probs[0, -1]
+    # TODO: insert gaps if shared by all three
+
+    # hard assignments
+    return p1probs
 
 
 if __name__ == "__main__":
