@@ -15,7 +15,8 @@ Usage:
   find_recombination.py -h | --help
 
 Options:
-  -h --help  Show this screen
+  -h --help     Show this screen
+  -v --verbose  Print progress
 
 """
 
@@ -306,6 +307,13 @@ def find_recombination(parents, child):
     return np.ma.masked_array(result, mask)
 
 
+def progress(xs):
+    n = len(xs)
+    for i, x in enumerate(xs):
+        print("\rprocessing {} / {}".format(i + 1, n), end="")
+        yield x
+
+
 if __name__ == "__main__":
     args = docopt(__doc__)
     filename = args["<infile>"]
@@ -313,6 +321,8 @@ if __name__ == "__main__":
     parents = reads[:2]
     children = reads[2:]
 
+    if args["--verbose"]:
+        children = progress(children)
     results = np.ma.vstack(list(find_recombination(parents, c) for c in children))
 
     outfile = args["<outfile>"]
