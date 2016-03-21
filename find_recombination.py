@@ -15,8 +15,9 @@ Usage:
   find_recombination.py -h | --help
 
 Options:
-  -h --help     Show this screen
+  --fast        Use only differing sites and interpolate
   -v --verbose  Print progress
+  -h --help     Show this screen
 
 """
 
@@ -272,7 +273,13 @@ def map_obs(parents, child):
     return np.ma.masked_array(result, mask)
 
 
-def find_recombination(parents, child):
+def L(n, N):
+    p = n / N
+    q = 1 - p
+    return p ** n * q ** (N - n)
+
+
+def find_recombination(parents, child, fast=False):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -287,6 +294,12 @@ def find_recombination(parents, child):
     observation = preprocess(pseqs, child.seq)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
     observation[observation.sum(axis=1) == 0, :] = 1
+
+    if fast:
+        # keep only differing parts
+        positions = np.where(observation.sum(axis=1) == 1)[0]
+        observation = observation[positions]
+
     S = np.array([0.5, 0.5])
     A = np.array([[0.9, 0.1],
                   [0.1, 0.9]])
@@ -296,7 +309,30 @@ def find_recombination(parents, child):
 
     # FIXME: this only works for two parents
     probs = np.exp(posterior_logprobs(observation, S, A, E))
-    result = probs[1, :]
+
+    if fast:
+        # now interpolate back
+        # probability that position came from parent 1
+        result = np.zeros(len(child))
+
+        # fill first part
+        result[:positions[0]] = probs[1, 0]
+
+        # interpolate
+        for i in range(len(positions) - 1):
+            pos1 = positions[i]
+            pos2 = positions[i + 1]
+            # interpolate probs[0, i] to probs[0, i + 1]
+            result[pos1:pos2 + 1] = np.linspace(probs[1, i],
+                                                probs[1, i + 1],
+                                                pos2 - pos1 + 1)
+        # fill last part
+        result[positions[-1]:] = probs[1, -1]
+
+        # # single parent model
+        # likelihood = L(n, N)
+    else:
+        result = probs[1, :]
 
     # insert gaps if shared by all three
     mask = np.zeros(len(result), dtype=np.bool)
@@ -323,7 +359,8 @@ if __name__ == "__main__":
 
     if args["--verbose"]:
         children = progress(children)
-    results = np.ma.vstack(list(find_recombination(parents, c) for c in children))
+
+    results = np.ma.vstack(list(find_recombination(parents, c, args['--fast']) for c in children))
 
     outfile = args["<outfile>"]
     np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f", delimiter=",")
