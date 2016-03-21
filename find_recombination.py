@@ -16,6 +16,7 @@ Usage:
 
 Options:
   --fast        Use only differing sites and interpolate
+  --emit        Constrain emission matrix to 1 d.o.f.
   -v --verbose  Print progress
   -h --help     Show this screen
 
@@ -196,7 +197,7 @@ def baumwelch_train(observations, S, A, E):
     return S, A_new, E_new
 
 
-def estimate_from_paths(paths, observations, n_states, n_symbols):
+def estimate_from_paths(paths, observations, n_states, n_symbols, emit=False):
     """A single iteration of Viterbi training.
 
     Constrains transition matrix to be symmetric with a constant diagonal
@@ -205,26 +206,39 @@ def estimate_from_paths(paths, observations, n_states, n_symbols):
     pseudocount = 0.1
     a = 0  # count transitions to same state
     E = np.zeros((n_states, n_symbols)) + pseudocount
+    e = 0  # count emissions matching state
     for path, obs in zip(paths, observations):
         if obs[0].sum() == 1:
             E[path[0], obs[0]] += 1
+        if obs[0].sum() == 1 and obs[0, path[0]] == 1:
+            e += 1
         for i in range(1, len(path)):
             source, sink = path[i - 1], path[i]
             if source == sink:
                 a += 1
+            if obs[i].sum() == 1 and obs[i, path[i]] == 1:
+                e += 1
             if obs[i].sum() == 1:
                 E[sink, obs[i]] += 1
+
     # convert to probability
     a = a / (pseudocount + sum(len(p) - 1 for p in paths))
+
+    e_denom = (obs.sum(axis=1) == 1).sum()  # number of unambiguous emissions
+    e = e / (pseudocount + e_denom)
     A = np.array([[a, 1 - a],
                   [1 - a, a]])
-    E = E / E.sum(axis=1).reshape((-1, 1))
+    if emit:
+        E = np.array([[e, 1 - e],
+                      [1 - e, e]])
+    else:
+        E = E / E.sum(axis=1).reshape((-1, 1))
     # set start probabilities to equilibrium distribution
     S = get_start(A)
     return S, A, E
 
 
-def viterbi_train(observations, S, A, E, max_iters=100):
+def viterbi_train(observations, S, A, E, emit=False, max_iters=100):
     n_states = A.shape[0]
     n_symbols = E.shape[1]
     assert A.shape == (n_states, n_states)
@@ -235,7 +249,7 @@ def viterbi_train(observations, S, A, E, max_iters=100):
         E_old = E.copy()
         paths = list(viterbi_decode(o, S, A, E)
                      for o in observations)
-        S, A, E = estimate_from_paths(paths, observations, n_states, n_symbols)
+        S, A, E = estimate_from_paths(paths, observations, n_states, n_symbols, emit=emit)
         if np.allclose(S_old, S) and \
            np.allclose(A_old, A) and \
            np.allclose(E_old, E):
@@ -279,7 +293,7 @@ def L(n, N):
     return p ** n * q ** (N - n)
 
 
-def find_recombination(parents, child, fast=False):
+def find_recombination(parents, child, emit=False, fast=False):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -305,7 +319,7 @@ def find_recombination(parents, child, fast=False):
                   [0.1, 0.9]])
     E = np.array([[0.9, 0.1],
                   [0.1, 0.9]])
-    S, A, E = viterbi_train([observation], S, A, E)
+    S, A, E = viterbi_train([observation], S, A, E, emit=emit)
 
     # FIXME: this only works for two parents
     probs = np.exp(posterior_logprobs(observation, S, A, E))
@@ -358,9 +372,14 @@ if __name__ == "__main__":
     children = reads[2:]
 
     if args["--verbose"]:
-        children = progress(children)
+        process_children = progress(children)
+    else:
+        process_children = children
 
-    results = np.ma.vstack(list(find_recombination(parents, c, args['--fast']) for c in children))
+    results = np.ma.vstack(list(find_recombination(parents, c,
+                                                   emit=args['--emit'],
+                                                   fast=args['--fast'])
+                                for c in process_children))
 
     outfile = args["<outfile>"]
     np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f", delimiter=",")
