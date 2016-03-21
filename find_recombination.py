@@ -30,6 +30,7 @@ import scipy.linalg
 from scipy.misc import logsumexp
 import numpy as np
 from matplotlib import pyplot as plot
+import pandas as pd
 
 
 # TODO: transpose forward, backward, and posterior probability matrices
@@ -142,7 +143,7 @@ def posterior_logprobs(obs, S, A, E):
     b = backward(obs, S, A, E)
     logP = logsumexp(f[:, -1])
     assert np.allclose(logsumexp(f + b - logP, axis=0), 0.0)
-    return (f + b - logP)
+    return (f + b - logP), logP
 
 
 def posterior_decode(obs, S, A, E):
@@ -287,10 +288,15 @@ def map_obs(parents, child):
     return np.ma.masked_array(result, mask)
 
 
-def L(n, N):
+def logP_single(n, N):
+    """
+    n: number of consistent observed symbols
+    N: total observations
+
+    """
     p = n / N
     q = 1 - p
-    return p ** n * q ** (N - n)
+    return np.log(p ** n * q ** (N - n))
 
 
 def find_recombination(parents, child, emit=False, fast=False):
@@ -322,7 +328,12 @@ def find_recombination(parents, child, emit=False, fast=False):
     S, A, E = viterbi_train([observation], S, A, E, emit=emit)
 
     # FIXME: this only works for two parents
-    probs = np.exp(posterior_logprobs(observation, S, A, E))
+    logprobs, logP2 = posterior_logprobs(observation, S, A, E)
+    probs = np.exp(logprobs)
+
+    n = observation[:, 0].sum()
+    N = len(observation)
+    logP1 = logP_single(n, N)
 
     if fast:
         # now interpolate back
@@ -343,8 +354,6 @@ def find_recombination(parents, child, emit=False, fast=False):
         # fill last part
         result[positions[-1]:] = probs[1, -1]
 
-        # # single parent model
-        # likelihood = L(n, N)
     else:
         result = probs[1, :]
 
@@ -354,7 +363,7 @@ def find_recombination(parents, child, emit=False, fast=False):
         if child[i] == '-':
             if set(p[i] for p in parents) == set('-'):
                 mask[i] = True
-    return np.ma.masked_array(result, mask)
+    return np.ma.masked_array(result, mask), logP2, logP1
 
 
 def progress(xs):
@@ -362,6 +371,17 @@ def progress(xs):
     for i, x in enumerate(xs):
         print("\rprocessing {} / {}".format(i + 1, n), end="")
         yield x
+    print("")
+
+
+def bic(logL, k, n):
+    """Bayesian information criterion
+
+    logL: log likelihood
+    k: number of parameters
+    n: sample size
+    """
+    return -2 * logL + k * np.log(n)
 
 
 if __name__ == "__main__":
@@ -376,23 +396,53 @@ if __name__ == "__main__":
     else:
         process_children = children
 
-    results = np.ma.vstack(list(find_recombination(parents, c,
-                                                   emit=args['--emit'],
-                                                   fast=args['--fast'])
-                                for c in process_children))
+    results = list(find_recombination(parents, c,
+                                      emit=args['--emit'],
+                                      fast=args['--fast'])
+                   for c in process_children)
+    logprobs, logP2s, logP1s = zip(*results)
+    logprobs = np.ma.vstack(logprobs)
 
     outfile = args["<outfile>"]
-    np.savetxt("{}.txt".format(outfile), results.filled(-1), fmt="%.4f", delimiter=",")
+    np.savetxt("{}.txt".format(outfile), logprobs.filled(-1), fmt="%.4f", delimiter=",")
 
     cmap = plot.cm.get_cmap('jet')
     cmap.set_bad('grey')
-    plot.imsave("{}-probs.png".format(outfile), results, cmap=cmap)
+    plot.imsave("{}-probs.png".format(outfile), logprobs, cmap=cmap)
 
     cmap2 = plot.cm.get_cmap('jet', 2)
     cmap2.set_bad('grey')
 
-    hard_results = (results > 0.5).astype(np.int)
-    plot.imsave("{}-hard.png".format(outfile), hard_results, cmap=cmap2)
+    hard_states = (logprobs > 0.5).astype(np.int)
+    plot.imsave("{}-hard.png".format(outfile), hard_states, cmap=cmap2)
 
-    all_obs = np.ma.vstack(list(map_obs(parents, c) for c in children))
+    if args["--verbose"]:
+        obs_children = progress(children)
+    else:
+        obs_children = children
+
+    all_obs = np.ma.vstack(list(map_obs(parents, c) for c in obs_children))
     plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
+
+    # write statistics
+    logP2s = np.array(logP2s)
+    logP1s = np.array(logP1s)
+
+    if args["--emit"]:
+        k2 = 2
+        k1 = 1
+    else:
+        k2 = 3
+        k1 = 2
+
+    if args["--fast"]:
+        ns = np.invert(all_obs.mask).sum(axis=1)
+    else:
+        ns = np.invert(logprobs.mask).sum(axis=1)
+
+    bic_1s = list(bic(logP, k1, n) for logP, n in zip(logP1s, ns))
+    bic_2s = list(bic(logP, k2, n) for logP, n in zip(logP2s, ns))
+
+    df = pd.DataFrame(np.array([logP1s, logP2s, bic_1s, bic_2s]).T,
+                      columns=["logL1", "logL2", "BIC_1", "BIC_2"])
+    df.to_csv("{}-stats.csv".format(outfile))
