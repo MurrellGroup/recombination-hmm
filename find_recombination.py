@@ -33,9 +33,6 @@ from matplotlib import pyplot as plot
 import pandas as pd
 
 
-# TODO: transpose forward, backward, and posterior probability matrices
-
-
 def _check_matrices(obs, S, A, E):
     S = S.ravel()
     n_states = A.shape[0]
@@ -413,7 +410,12 @@ if __name__ == "__main__":
     cmap2 = plot.cm.get_cmap('jet', 2)
     cmap2.set_bad('grey')
 
+    gap_array = np.array(list(list(char == "-" for char in c)
+                             for c in children))
+    plot.imsave("{}-gaps.png".format(outfile), gap_array, cmap=plot.cm.gray)
+
     hard_states = (logprobs > 0.5).astype(np.int)
+    hard_states.mask = logprobs.mask
     plot.imsave("{}-hard.png".format(outfile), hard_states, cmap=cmap2)
 
     if args["--verbose"]:
@@ -425,24 +427,48 @@ if __name__ == "__main__":
     plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
 
     # write statistics
-    logP2s = np.array(logP2s)
     logP1s = np.array(logP1s)
+    logP2s = np.array(logP2s)
 
     if args["--emit"]:
-        k2 = 2
         k1 = 1
+        k2 = 2
     else:
-        k2 = 3
         k1 = 2
+        k2 = 3
 
     if args["--fast"]:
         ns = np.invert(all_obs.mask).sum(axis=1)
     else:
         ns = np.invert(logprobs.mask).sum(axis=1)
 
-    bic_1s = list(bic(logP, k1, n) for logP, n in zip(logP1s, ns))
-    bic_2s = list(bic(logP, k2, n) for logP, n in zip(logP2s, ns))
+    bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
+    bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
 
-    df = pd.DataFrame(np.array([logP1s, logP2s, bic_1s, bic_2s]).T,
-                      columns=["logL1", "logL2", "BIC_1", "BIC_2"])
-    df.to_csv("{}-stats.csv".format(outfile))
+    obs_frac = (all_obs == 0).sum(axis=1) / np.invert(all_obs.mask).sum(axis=1)
+    inferred_frac = (hard_states == 0).sum(axis=1) / np.invert(hard_states.mask).sum(axis=1)
+
+    recombined = (bic_2s < bic_1s)
+
+    df = pd.DataFrame({
+        "observed_frac0": obs_frac,
+        "inferred_frac0": inferred_frac,
+        "logL1": logP1s,
+        "logL2": logP2s,
+        "BIC1": bic_1s,
+        "BIC2": bic_2s,
+        "recombined": recombined,
+    })
+    cols = [
+        "observed_frac0",
+        "inferred_frac0",
+        "logL1",
+        "logL2",
+        "BIC1",
+        "BIC2",
+        "recombined",
+    ]
+    df[cols].to_csv("{}-stats.csv".format(outfile), index=False)
+
+    print("{} / {} ({:.2f} %) recombined".format(recombined.sum(), len(recombined),
+                                             recombined.sum() / len(recombined) * 100))
