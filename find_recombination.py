@@ -224,9 +224,14 @@ def estimate_from_paths(paths, observations, n_states,
 
     """
     pseudocount = 0.1
-    a = 0  # count transitions to same state
+    # count transitions to same state
+    a = 0
+
+    # unconstrained emission matrix
     E = np.zeros((n_states, n_symbols)) + pseudocount
-    e = 0  # count emissions matching state
+
+    # count emissions matching state
+    e = 0
     for path, obs in zip(paths, observations):
         if obs[0].sum() == 1:
             E[path[0], obs[0]] += 1
@@ -338,9 +343,15 @@ def find_recombination(parents, child, emit=False, fast=False):
 
     """
     pseqs = list(p.seq for p in parents)
+
     observation = preprocess(pseqs, child.seq)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
     observation[observation.sum(axis=1) == 0, :] = 1
+
+    # now each individual observation is either (0, 1), (1, 0), or
+    # (1, 1). The idea is that when the observation is (1, 1), the
+    # emission probability will be e + (1 - e) == 1, so it will not
+    # contribute to the log probability at all.
 
     if fast:
         # keep only differing parts
