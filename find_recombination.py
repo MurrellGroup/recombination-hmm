@@ -70,6 +70,15 @@ def _check_matrices(obs, S, A, E):
                         ' {}'.format(np.max(obs)))
 
 
+def precompute_emission(logemission):
+    cache = {}
+    for key in ((False, True), (True, False)):
+        cache[key] = logsumexp(logemission[:, np.array(key)], axis=1)
+    # should be exactly 0, but not always is because of floating point error
+    cache[(True, True)] = np.array([0, 0])
+    return cache
+
+
 def viterbi_decode(obs, S, A, E):
     """Viterbi algorithm.
 
@@ -88,13 +97,14 @@ def viterbi_decode(obs, S, A, E):
         logstart = np.log(S)
         logemission = np.log(E)
 
+    emission = precompute_emission(logemission)
     trellis = np.zeros((n_states, len(obs)))
     backpt = np.ones((n_states, len(obs)), np.int) * -1
 
-    trellis[:, 0] = logstart + logsumexp(logemission[:, obs[0]], axis=1)
+    trellis[:, 0] = logstart + emission[tuple(obs[0])]
     for t in range(1, len(obs)):
         logprobs = trellis[:, t - 1].reshape(-1, 1) + logtrans + \
-                   logsumexp(logemission[:, obs[t]], axis=1).reshape(1, -1)
+                   emission[tuple(obs[t])]
         trellis[:, t] = logprobs.max(axis=0)
         backpt[:, t] = logprobs.argmax(axis=0)
     result = [trellis[:, -1].argmax()]
@@ -121,11 +131,13 @@ def forward(obs, S, A, E):
         logstart = np.log(S)
         logemission = np.log(E)
 
+    emission = precompute_emission(logemission)
+
     trellis = np.zeros((n_states, len(obs)))
-    trellis[:, 0] = logstart + logsumexp(logemission[:, obs[0]], axis=1)
+    trellis[:, 0] = logstart + emission[tuple(obs[0])]
     for t in range(1, len(obs)):
         logprobs = logsumexp(trellis[:, t - 1].reshape(-1, 1) + logtrans, axis=0)
-        trellis[:, t] = logprobs + logsumexp(logemission[:, obs[t]], axis=1)
+        trellis[:, t] = logprobs + emission[tuple(obs[t])]
     return trellis
 
 
@@ -146,12 +158,14 @@ def backward(obs, S, A, E):
         logstart = np.log(S)
         logemission = np.log(E)
 
+    emission = precompute_emission(logemission)
+
     trellis = np.zeros((n_states, len(obs)))
     trellis[:, -1] = 0
     for t in reversed(range(len(obs) - 1)):
         logprobs = logtrans + \
                    trellis[:, t + 1].reshape(1, -1) + \
-                   logsumexp(logemission[:, obs[t + 1]], axis=1).reshape(1, -1)
+                   emission[tuple(obs[t + 1])]
         trellis[:, t] = logsumexp(logprobs, axis=1)
     return trellis
 
