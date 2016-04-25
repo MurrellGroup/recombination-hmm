@@ -34,6 +34,15 @@ import pandas as pd
 
 
 def _check_matrices(obs, S, A, E):
+    """Ensure matrices have the correct shapes and contents.
+
+    obs: series of observed symbols
+
+    S: initial probabilities. shape: (n_states,)
+    A: transmission matrix. shape: (n_states, n_states)
+    E: emission matrix. shape: (n_states, n_symbols)
+
+    """
     S = S.ravel()
     n_states = A.shape[0]
     n_symbols = E.shape[1]
@@ -96,6 +105,12 @@ def viterbi_decode(obs, S, A, E):
 
 
 def forward(obs, S, A, E):
+    """Computes forward DP matrix.
+
+    `trellis[i, j]` is probability of being in state `i` in position `j`
+    given `obs[:j+1]`.
+
+    """
     _check_matrices(obs, S, A, E)
     S = S.ravel()
     n_states = A.shape[0]
@@ -115,6 +130,12 @@ def forward(obs, S, A, E):
 
 
 def backward(obs, S, A, E):
+    """Computes backward DP matrix.
+
+    trellis[i, j] is probability of being in state i in position j
+    given obs[j:].
+
+    """
     _check_matrices(obs, S, A, E)
     S = S.ravel()
     n_states = A.shape[0]
@@ -136,6 +157,10 @@ def backward(obs, S, A, E):
 
 
 def posterior_logprobs(obs, S, A, E):
+    """Compute the posterior log probabilities for each state in each
+    position, and the overall log probability.
+
+    """
     f = forward(obs, S, A, E)
     b = backward(obs, S, A, E)
     logP = logsumexp(f[:, -1])
@@ -143,13 +168,8 @@ def posterior_logprobs(obs, S, A, E):
     return (f + b - logP), logP
 
 
-def posterior_decode(obs, S, A, E):
-    p = posterior_logprobs(obs, S, A, E)
-    return np.argmax(p, axis=1)
-
-
 def get_start(A):
-    """Stationary distribution of A"""
+    """Stationary distribution of transmission matrix."""
     vals, vecs = scipy.linalg.eig(A, left=True, right=False)
     idx = np.argmax(vals)
     S = vecs[:, idx]
@@ -263,10 +283,9 @@ def viterbi_train(observations, S, A, E, emit=False, max_iters=100):
 
 
 def preprocess(parents, child):
-    """Encode which parent each position matches.
+    """1-hot encoding for which parent each position matches.
 
-    >>> preprocess("AATT", "tagt", "TATA")
-    [[0, 1], [1, 1], [1, 0], [0, 0]]
+    `result[i, j]` is True if the child matches parent `j` in position `i`.
 
     """
     parents = list(p.upper() for p in parents)
@@ -281,6 +300,12 @@ def preprocess(parents, child):
 
 
 def map_obs(parents, child):
+    """run `preprocess()`, but then convert 1-hot encoding to binary
+    encoding and mask positions where both parents match.
+
+    Only works for two parents.
+
+    """
     if len(parents) != 2:
         raise Exception('map_obs() currently only works with two parents')
     obs = preprocess(parents, child)
