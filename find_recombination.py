@@ -339,12 +339,20 @@ def map_obs(parents, child):
     return np.ma.masked_array(result, mask)
 
 
-def logP_single(n, N):
-    """
-    n: number of consistent observed symbols
-    N: total observations
+def logP_single(observation):
+    """Log prob of single parent model.
+
+    Only considers (0, 1) or (1, 0) positions.
 
     """
+    n = 0
+    N = 0
+    for i in range(len(observation)):
+        if np.all(observation[i] == np.array([True, False])):
+            n += 1
+            N += 1
+        elif np.all(observation[i] == np.array([False, True])):
+            N += 1
     if n == N or n == 0:
         return 0
     p = n / N
@@ -402,9 +410,7 @@ def find_recombination(parents, child, emit=False, fast=False):
     logprobs, logP2 = posterior_logprobs(observation, S, A, E)
     probs = np.exp(logprobs)
 
-    n = observation[:, 0].sum()
-    N = len(observation)
-    logP1 = logP_single(n, N)
+    logP1 = logP_single(observation)
 
     if fast:
         # now interpolate back
