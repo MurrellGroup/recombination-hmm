@@ -322,6 +322,8 @@ def map_obs(parents, child):
     """run `preprocess()`, but then convert 1-hot encoding to binary
     encoding and mask positions where both parents match.
 
+    Also mask terminal gaps.
+
     Only works for two parents.
 
     """
@@ -331,6 +333,9 @@ def map_obs(parents, child):
     result = np.zeros(len(obs))
     result[obs[:, 1]] = 1
     mask = obs[:, 0] == obs[:, 1]
+    start, stop = range_without_gaps(str(child.seq))
+    mask[:start] = True
+    mask[stop:] = True
     return np.ma.masked_array(result, mask)
 
 
@@ -340,9 +345,18 @@ def logP_single(n, N):
     N: total observations
 
     """
+    if n == N or n == 0:
+        return 0
     p = n / N
     q = 1 - p
-    return np.log(p ** n * q ** (N - n))
+    return n * np.log(p) + (N - n) * np.log(q)
+
+
+def range_without_gaps(cseq):
+    pattern = r'[^-]'
+    start = re.search(pattern, cseq).start()
+    stop = len(cseq) - re.search(pattern, cseq[::-1]).start()
+    return start, stop
 
 
 def find_recombination(parents, child, emit=False, fast=False):
@@ -359,9 +373,7 @@ def find_recombination(parents, child, emit=False, fast=False):
 
     # find and remove terminal gaps in child sequence
     cseq = str(child.seq)
-    pattern = r'[^-]'
-    start = re.search(pattern, cseq).start()
-    stop = len(cseq) - re.search(pattern, cseq[::-1]).start()
+    start, stop = range_without_gaps(cseq)
     cseq = child.seq[start: stop]
     pseqs = list(p.seq[start: stop] for p in parents)
 
@@ -450,6 +462,10 @@ def bic(logL, k, n):
     return -2 * logL + k * np.log(n)
 
 
+def aic(logL, k):
+    return 2 * k - 2 * logL
+
+
 if __name__ == "__main__":
     args = docopt(__doc__)
     filename = args["<infile>"]
@@ -494,6 +510,7 @@ if __name__ == "__main__":
     else:
         obs_children = children
 
+    # FIXME: does not take terminal gaps into account
     all_obs = np.ma.vstack(list(map_obs(parents, c) for c in obs_children))
     plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
 
@@ -516,10 +533,13 @@ if __name__ == "__main__":
     bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
     bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
 
+    aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
+    aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
+
     obs_frac = (all_obs == 0).sum(axis=1) / np.invert(all_obs.mask).sum(axis=1)
     inferred_frac = (hard_states == 0).sum(axis=1) / np.invert(hard_states.mask).sum(axis=1)
 
-    recombined = (bic_2s < bic_1s)
+    recombined = (aic_2s < aic_1s)
 
     df = pd.DataFrame({
         "observed_frac0": obs_frac,
@@ -528,6 +548,8 @@ if __name__ == "__main__":
         "logL2": logP2s,
         "BIC1": bic_1s,
         "BIC2": bic_2s,
+        "AIC1": aic_1s,
+        "AIC2": aic_2s,
         "recombined": recombined,
     })
     cols = [
@@ -537,6 +559,8 @@ if __name__ == "__main__":
         "logL2",
         "BIC1",
         "BIC2",
+        "AIC1",
+        "AIC2",
         "recombined",
     ]
     df[cols].to_csv("{}-stats.csv".format(outfile), index=False)
