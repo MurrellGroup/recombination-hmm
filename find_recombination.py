@@ -195,10 +195,12 @@ def baumwelch_train(observations, S, A, E):
     return S, A_new, E_new
 
 
-def estimate_from_paths(paths, observations, n_states, n_symbols, emit=False):
+def estimate_from_paths(paths, observations, n_states,
+                        n_symbols, emit=False):
     """A single iteration of Viterbi training.
 
-    Constrains transition matrix to be symmetric with a constant diagonal
+    Constrains transition matrix to be symmetric with a constant
+    diagonal.
 
     """
     pseudocount = 0.1
@@ -222,7 +224,8 @@ def estimate_from_paths(paths, observations, n_states, n_symbols, emit=False):
     # convert to probability
     a = a / (pseudocount + sum(len(p) - 1 for p in paths))
 
-    e_denom = (obs.sum(axis=1) == 1).sum()  # number of unambiguous emissions
+    # number of unambiguous emissions
+    e_denom = (obs.sum(axis=1) == 1).sum()
     e = e / (pseudocount + e_denom)
     A = np.array([[a, 1 - a],
                   [1 - a, a]])
@@ -247,13 +250,15 @@ def viterbi_train(observations, S, A, E, emit=False, max_iters=100):
         E_old = E.copy()
         paths = list(viterbi_decode(o, S, A, E)
                      for o in observations)
-        S, A, E = estimate_from_paths(paths, observations, n_states, n_symbols, emit=emit)
+        S, A, E = estimate_from_paths(paths, observations, n_states,
+                                      n_symbols, emit=emit)
         if np.allclose(S_old, S) and \
            np.allclose(A_old, A) and \
            np.allclose(E_old, E):
             break
     if i == max_iters - 1:
-        warnings.warn('viterbi training forced to stop after {} iterations'.format(max_iters))
+        warnings.warn('viterbi training forced to stop after '
+                      ' {} iterations'.format(max_iters))
     return S, A, E
 
 
@@ -401,7 +406,8 @@ if __name__ == "__main__":
     logprobs = np.ma.vstack(logprobs)
 
     outfile = args["<outfile>"]
-    np.savetxt("{}.txt".format(outfile), logprobs.filled(-1), fmt="%.4f", delimiter=",")
+    np.savetxt("{}.txt".format(outfile),
+               logprobs.filled(-1), fmt="%.4f", delimiter=",")
 
     cmap = plot.cm.get_cmap('jet')
     cmap.set_bad('grey')
@@ -412,7 +418,8 @@ if __name__ == "__main__":
 
     gap_array = np.array(list(list(char == "-" for char in c)
                              for c in children))
-    plot.imsave("{}-gaps.png".format(outfile), gap_array, cmap=plot.cm.gray)
+    plot.imsave("{}-gaps.png".format(outfile), gap_array,
+                cmap=plot.cm.gray)
 
     hard_states = (logprobs > 0.5).astype(np.int)
     hard_states.mask = logprobs.mask
@@ -470,5 +477,6 @@ if __name__ == "__main__":
     ]
     df[cols].to_csv("{}-stats.csv".format(outfile), index=False)
 
-    print("{} / {} ({:.2f} %) recombined".format(recombined.sum(), len(recombined),
-                                             recombined.sum() / len(recombined) * 100))
+    print("{} / {} ({:.2f} %) recombined".format(
+        recombined.sum(), len(recombined),
+        recombined.sum() / len(recombined) * 100))
