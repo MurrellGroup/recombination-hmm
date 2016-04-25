@@ -21,7 +21,7 @@ Options:
   -h --help     Show this screen
 
 """
-
+import re
 import warnings
 
 from Bio import SeqIO
@@ -342,9 +342,16 @@ def find_recombination(parents, child, emit=False, fast=False):
     Gaps in all three sequences are masked.
 
     """
-    pseqs = list(p.seq for p in parents)
 
-    observation = preprocess(pseqs, child.seq)
+    # find and remove terminal gaps in child sequence
+    cseq = str(child.seq)
+    pattern = r'[^-]'
+    start = re.search(pattern, cseq).start()
+    stop = len(cseq) - re.search(pattern, cseq[::-1]).start()
+    cseq = child.seq[start: stop]
+    pseqs = list(p.seq[start: stop] for p in parents)
+
+    observation = preprocess(pseqs, cseq)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
     observation[observation.sum(axis=1) == 0, :] = 1
 
@@ -376,8 +383,7 @@ def find_recombination(parents, child, emit=False, fast=False):
     if fast:
         # now interpolate back
         # probability that position came from parent 1
-        result = np.zeros(len(child))
-
+        result = np.zeros(len(cseq))
         # fill first part
         result[:positions[0]] = probs[1, 0]
 
@@ -395,13 +401,21 @@ def find_recombination(parents, child, emit=False, fast=False):
     else:
         result = probs[1, :]
 
-    # insert gaps if shared by all three
-    mask = np.zeros(len(result), dtype=np.bool)
-    for i in range(len(result)):
+    # map back to full alignment coordinates
+    full_result = np.zeros(len(child))
+    full_result[start:stop] = result
+
+    # mask terminal gaps, and gaps that are shared by all three
+    mask = np.zeros(len(full_result), dtype=np.bool)
+    for i in range(len(full_result)):
+        if i < start:
+            mask[i] = True
+        if i >= stop:
+            mask[i] = True
         if child[i] == '-':
             if set(p[i] for p in parents) == set('-'):
                 mask[i] = True
-    return np.ma.masked_array(result, mask), logP2, logP1
+    return np.ma.masked_array(full_result, mask), logP2, logP1
 
 
 def progress(xs):
