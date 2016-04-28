@@ -458,16 +458,6 @@ def progress(xs):
     print("")
 
 
-def bic(logL, k, n):
-    """Bayesian information criterion
-
-    logL: log likelihood
-    k: number of parameters
-    n: sample size
-    """
-    return -2 * logL + k * np.log(n)
-
-
 def aic(logL, k):
     return 2 * k - 2 * logL
 
@@ -516,7 +506,6 @@ if __name__ == "__main__":
     else:
         obs_children = children
 
-    # FIXME: does not take terminal gaps into account
     all_obs = np.ma.vstack(list(map_obs(parents, c) for c in obs_children))
     plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
 
@@ -531,14 +520,6 @@ if __name__ == "__main__":
         k1 = 2
         k2 = 3
 
-    if args["--fast"]:
-        ns = np.invert(all_obs.mask).sum(axis=1)
-    else:
-        ns = np.invert(logprobs.mask).sum(axis=1)
-
-    bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
-    bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
-
     aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
     aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
 
@@ -552,8 +533,6 @@ if __name__ == "__main__":
         "inferred_frac0": inferred_frac,
         "logL1": logP1s,
         "logL2": logP2s,
-        "BIC1": bic_1s,
-        "BIC2": bic_2s,
         "AIC1": aic_1s,
         "AIC2": aic_2s,
         "recombined": recombined,
@@ -563,8 +542,6 @@ if __name__ == "__main__":
         "inferred_frac0",
         "logL1",
         "logL2",
-        "BIC1",
-        "BIC2",
         "AIC1",
         "AIC2",
         "recombined",
