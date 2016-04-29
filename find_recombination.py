@@ -23,6 +23,7 @@ Options:
 """
 import re
 import warnings
+from itertools import groupby
 
 from Bio import SeqIO
 from docopt import docopt
@@ -454,13 +455,36 @@ def progress(xs, verbose=False):
     n = len(xs)
     for i, x in enumerate(xs):
         if verbose:
-            print("\r\tprocessing {} / {}".format(i + 1, n), end="")
+            print("\rprocessing {} / {}".format(i, n), end='')
         yield x
     print("")
 
 
 def aic(logL, k):
     return 2 * k - 2 * logL
+
+
+def _longest_runs(runs):
+    """
+
+    >>> list(_longest_runs([(0, 3), (1, 5), (0, 2), (1, 6)]))
+    [3, 6]
+
+    """
+    parents = [0, 1]
+    return np.array(list(max((length for p, length in runs
+                              if p == parent), default=0)
+                         for parent in sorted(parents)))
+
+
+def longest_runs(arr, remove_cols):
+    if remove_cols:
+        cbools = arr.mask.sum(axis=0) == arr.shape[0]
+        arr = arr[:, ~cbools]
+    runs = list(list((k, len(list(g)))
+                     for k, g in groupby(row) if k in (0, 1))
+                for row in arr)
+    return np.vstack(list(_longest_runs(r) for r in runs))
 
 
 if __name__ == "__main__":
@@ -478,7 +502,9 @@ if __name__ == "__main__":
     all_obs = np.ma.vstack(list(map_obs(parents, c)
                                 for c in progress(children, verbose)))
     np.savetxt("{}-input.txt".format(outfile),
-               logprobs.filled(-1), fmt="%.4f", delimiter=",")
+               all_obs.filled(-1), fmt="%.0f", delimiter=",")
+    runs = longest_runs(all_obs, remove_cols=True)
+    cruns = longest_runs(all_obs, remove_cols=False)
 
     if verbose:
         print('finding recombination')
@@ -512,26 +538,34 @@ if __name__ == "__main__":
     recombined = (aic_2s < aic_1s)
 
     df = pd.DataFrame({
+            'longest_parent_0': runs[:, 0],
+            'longest_parent_1': runs[:, 1],
+            'longest_contiguous_parent_0': cruns[:, 0],
+            'longest_contiguous_parent_1': cruns[:, 1],
             "n_observed_parent_0": (all_obs == 0).sum(axis=1),
-            "n_observed": np.invert(all_obs.mask).sum(axis=1),
+            "n_observed_parent_1": (all_obs == 1).sum(axis=1),
             "n_inferred_parent_0": (hard_states == 0).sum(axis=1),
             "n_inferred": np.invert(hard_states.mask).sum(axis=1),
             "logL1": logP1s,
             "logL2": logP2s,
             "AIC1": aic_1s,
             "AIC2": aic_2s,
-            "recombined": recombined,
+            "recombined_aic": recombined,
             })
     cols = [
+        'longest_parent_0',
+        'longest_parent_1',
+        'longest_contiguous_parent_0',
+        'longest_contiguous_parent_1',
         "n_observed_parent_0",
-        "n_observed",
+        "n_observed_parent_1",
         "n_inferred_parent_0",
         "n_inferred",
         "logL1",
         "logL2",
         "AIC1",
         "AIC2",
-        "recombined",
+        "recombined_aic",
     ]
     df[cols].to_csv("{}-stats.csv".format(outfile), index=False)
 
