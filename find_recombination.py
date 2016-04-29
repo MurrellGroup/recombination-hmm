@@ -450,10 +450,11 @@ def find_recombination(parents, child, emit=False, fast=False):
     return np.ma.masked_array(full_result, mask), logP2, logP1
 
 
-def progress(xs):
+def progress(xs, verbose=False):
     n = len(xs)
     for i, x in enumerate(xs):
-        print("\rprocessing {} / {}".format(i + 1, n), end="")
+        if verbose:
+            print("\r\tprocessing {} / {}".format(i + 1, n), end="")
         yield x
     print("")
 
@@ -465,49 +466,31 @@ def aic(logL, k):
 if __name__ == "__main__":
     args = docopt(__doc__)
     filename = args["<infile>"]
+    outfile = args["<outfile>"]
+    verbose = args["--verbose"]
+
     reads = list(SeqIO.parse(filename, 'fasta'))
     parents = reads[:2]
     children = reads[2:]
 
-    if args["--verbose"]:
-        process_children = progress(children)
-    else:
-        process_children = children
+    if verbose:
+        print('computing observations')
+    all_obs = np.ma.vstack(list(map_obs(parents, c)
+                                for c in progress(children, verbose)))
+    np.savetxt("{}-input.txt".format(outfile),
+               logprobs.filled(-1), fmt="%.4f", delimiter=",")
 
+    if verbose:
+        print('finding recombination')
     results = list(find_recombination(parents, c,
                                       emit=args['--emit'],
                                       fast=args['--fast'])
-                   for c in process_children)
+                   for c in progress(children, verbose))
     logprobs, logP2s, logP1s = zip(*results)
     logprobs = np.ma.vstack(logprobs)
 
-    outfile = args["<outfile>"]
-    np.savetxt("{}.txt".format(outfile),
+    np.savetxt("{}-logprobs.txt".format(outfile),
                logprobs.filled(-1), fmt="%.4f", delimiter=",")
-
-    cmap = plot.cm.get_cmap('jet')
-    cmap.set_bad('grey')
-    plot.imsave("{}-probs.png".format(outfile), logprobs, cmap=cmap)
-
-    cmap2 = plot.cm.get_cmap('jet', 2)
-    cmap2.set_bad('grey')
-
-    gap_array = np.array(list(list(char == "-" for char in c)
-                             for c in children))
-    plot.imsave("{}-gaps.png".format(outfile), gap_array,
-                cmap=plot.cm.gray)
-
-    hard_states = (logprobs > 0.5).astype(np.int)
-    hard_states.mask = logprobs.mask
-    plot.imsave("{}-hard.png".format(outfile), hard_states, cmap=cmap2)
-
-    if args["--verbose"]:
-        obs_children = progress(children)
-    else:
-        obs_children = children
-
-    all_obs = np.ma.vstack(list(map_obs(parents, c) for c in obs_children))
-    plot.imsave("{}-input.png".format(outfile), all_obs, cmap=cmap2)
 
     # write statistics
     logP1s = np.array(logP1s)
@@ -523,23 +506,27 @@ if __name__ == "__main__":
     aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
     aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
 
-    obs_frac = (all_obs == 0).sum(axis=1) / np.invert(all_obs.mask).sum(axis=1)
-    inferred_frac = (hard_states == 0).sum(axis=1) / np.invert(hard_states.mask).sum(axis=1)
+    hard_states = (logprobs > 0.5).astype(np.int)
+    hard_states.mask = logprobs.mask
 
     recombined = (aic_2s < aic_1s)
 
     df = pd.DataFrame({
-        "observed_frac0": obs_frac,
-        "inferred_frac0": inferred_frac,
-        "logL1": logP1s,
-        "logL2": logP2s,
-        "AIC1": aic_1s,
-        "AIC2": aic_2s,
-        "recombined": recombined,
-    })
+            "n_observed_parent_0": (all_obs == 0).sum(axis=1),
+            "n_observed": np.invert(all_obs.mask).sum(axis=1),
+            "n_inferred_parent_0": (hard_states == 0).sum(axis=1),
+            "n_inferred": np.invert(hard_states.mask).sum(axis=1),
+            "logL1": logP1s,
+            "logL2": logP2s,
+            "AIC1": aic_1s,
+            "AIC2": aic_2s,
+            "recombined": recombined,
+            })
     cols = [
-        "observed_frac0",
-        "inferred_frac0",
+        "n_observed_parent_0",
+        "n_observed",
+        "n_inferred_parent_0",
+        "n_inferred",
         "logL1",
         "logL2",
         "AIC1",
