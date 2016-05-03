@@ -16,7 +16,7 @@ Usage:
 
 Options:
   --fast        Use only differing sites and interpolate
-  --emit        Constrain emission matrix to 1 d.o.f.
+  --constrain   Constrain emission matrix to 1 d.o.f.
   -v --verbose  Print progress
   -h --help     Show this screen
 
@@ -231,7 +231,7 @@ def baumwelch_train(observations, S, A, E):
 
 
 def estimate_from_paths(paths, observations, n_states,
-                        n_symbols, emit=False):
+                        n_symbols, constrain=False):
     """A single iteration of Viterbi training.
 
     Constrains transition matrix to be symmetric with a constant
@@ -269,7 +269,7 @@ def estimate_from_paths(paths, observations, n_states,
     e = e / (pseudocount + e_denom)
     A = np.array([[a, 1 - a],
                   [1 - a, a]])
-    if emit:
+    if constrain:
         E = np.array([[e, 1 - e],
                       [1 - e, e]])
     else:
@@ -279,7 +279,7 @@ def estimate_from_paths(paths, observations, n_states,
     return S, A, E
 
 
-def viterbi_train(observations, S, A, E, emit=False, max_iters=100):
+def viterbi_train(observations, S, A, E, constrain=False, max_iters=100):
     n_states = A.shape[0]
     n_symbols = E.shape[1]
     assert A.shape == (n_states, n_states)
@@ -291,7 +291,7 @@ def viterbi_train(observations, S, A, E, emit=False, max_iters=100):
         paths = list(viterbi_decode(o, S, A, E)
                      for o in observations)
         S, A, E = estimate_from_paths(paths, observations, n_states,
-                                      n_symbols, emit=emit)
+                                      n_symbols, constrain=constrain)
         if np.allclose(S_old, S) and \
            np.allclose(A_old, A) and \
            np.allclose(E_old, E):
@@ -368,7 +368,7 @@ def range_without_gaps(cseq):
     return start, stop
 
 
-def find_recombination(parents, child, emit=False, fast=False):
+def find_recombination(parents, child, constrain=False, fast=False):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -405,7 +405,7 @@ def find_recombination(parents, child, emit=False, fast=False):
                   [0.1, 0.9]])
     E = np.array([[0.9, 0.1],
                   [0.1, 0.9]])
-    S, A, E = viterbi_train([observation], S, A, E, emit=emit)
+    S, A, E = viterbi_train([observation], S, A, E, constrain=constrain)
 
     # FIXME: this only works for two parents
     logprobs, logP2 = posterior_logprobs(observation, S, A, E)
@@ -509,7 +509,7 @@ if __name__ == "__main__":
     if verbose:
         print('finding recombination')
     results = list(find_recombination(parents, c,
-                                      emit=args['--emit'],
+                                      constrain=args['--constrain'],
                                       fast=args['--fast'])
                    for c in progress(children, verbose))
     logprobs, logP2s, logP1s = zip(*results)
@@ -523,7 +523,7 @@ if __name__ == "__main__":
     logP2s = np.array(logP2s)
 
     k1 = 1
-    k2 = 2 if args['--emit'] else 3
+    k2 = 2 if args['--constrain'] else 3
 
     aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
     aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
