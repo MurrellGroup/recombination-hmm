@@ -308,6 +308,12 @@ def preprocess(parents, child, ignore_gaps=False):
 
     `result[i, j]` is True if the child matches parent `j` in position `i`.
 
+    >>> list(preprocess(['AAA', 'AAC'], 'ATA', ignore_gaps=False))
+    [array([True, True]), array([False, False]), array([True, False])]
+
+    >>> list(preprocess(['A-A', 'AAC'], 'A-A', ignore_gaps=True))
+    [array([True, True]), array([False, False]), array([True, False])]
+
     """
     parents = list(p.upper() for p in parents)
     child = child.upper()
@@ -319,7 +325,7 @@ def preprocess(parents, child, ignore_gaps=False):
         else:
             for j in range(len(parents)):
                 result.append(child[i] == parents[j][i])
-        observation.append(result)
+        observation.append(np.array(result, dtype=np.bool))
     return np.vstack(observation)
 
 
@@ -335,7 +341,7 @@ def map_obs(parents, child, ignore_gaps=False):
     if len(parents) != 2:
         raise Exception('map_obs() currently only works with two parents')
     obs = preprocess(parents, child, ignore_gaps=ignore_gaps)
-    result = np.zeros(len(obs))
+    result = np.zeros(len(obs), dtype=np.int)
     result[obs[:, 1]] = 1
     mask = (obs[:, 0] == obs[:, 1])
     start, stop = range_without_gaps(str(child.seq))
@@ -383,7 +389,6 @@ def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=
     Gaps in all three sequences are masked.
 
     """
-
     # find and remove terminal gaps in child sequence
     cseq = str(child.seq)
     start, stop = range_without_gaps(cseq)
@@ -514,17 +519,22 @@ if __name__ == "__main__":
     rel_probs1 = np.exp((aic_mins - aic_1s) / 2)
     rel_probs2 = np.exp((aic_mins - aic_2s) / 2)
 
-    n_obs = np.invert(all_obs.mask).sum(axis=1)
-    bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, n_obs)))
-    bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, n_obs)))
+    ranges = list(range_without_gaps(str(c.seq)) for c in children)
+    n_positions = list((stop - start) for start, stop in ranges)
+
+    n_informative = np.invert(all_obs.mask).sum(axis=1)
+    ns = n_informative if args['--fast'] else n_positions
+    bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
+    bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
 
     hard_states = (logprobs > 0.5).astype(np.int)
     hard_states.mask = logprobs.mask
 
     df = pd.DataFrame({
-        'n_obs': n_obs,
-        "n_observed_0": (all_obs == 0).sum(axis=1),
-        "n_observed_1": (all_obs == 1).sum(axis=1),
+        'n_positions': n_positions,
+        'n_informative': n_informative,
+        "n_informative_0": (all_obs == 0).sum(axis=1),
+        "n_informative_1": (all_obs == 1).sum(axis=1),
         "n_inferred": np.invert(hard_states.mask).sum(axis=1),
         "n_inferred_0": (hard_states == 0).sum(axis=1),
         "n_inferred_1": (hard_states == 1).sum(axis=1),
@@ -540,9 +550,10 @@ if __name__ == "__main__":
         "rel_prob2": rel_probs2,
     })
     cols = [
-        'n_obs',
-        "n_observed_0",
-        "n_observed_1",
+        'n_positions',
+        'n_informative',
+        "n_informative_0",
+        "n_informative_1",
         "n_inferred",
         "n_inferred_0",
         "n_inferred_1",
