@@ -477,10 +477,7 @@ def _longest_runs(runs):
                          for parent in sorted(parents)))
 
 
-def longest_runs(arr, remove_cols):
-    if remove_cols:
-        cbools = arr.mask.sum(axis=0) == arr.shape[0]
-        arr = arr[:, ~cbools]
+def longest_runs(arr)
     runs = list(list((k, len(list(g)))
                      for k, g in groupby(row) if k in (0, 1))
                 for row in arr)
@@ -503,8 +500,7 @@ if __name__ == "__main__":
                                 for c in progress(children, verbose)))
     np.savetxt("{}-input.txt".format(outfile),
                all_obs.filled(-1), fmt="%.0f", delimiter=",")
-    runs = longest_runs(all_obs, remove_cols=True)
-    cruns = longest_runs(all_obs, remove_cols=False)
+    runs = longest_runs(all_obs)
 
     if verbose:
         print('finding recombination')
@@ -540,8 +536,6 @@ if __name__ == "__main__":
     df = pd.DataFrame({
             'longest_parent_0': runs[:, 0],
             'longest_parent_1': runs[:, 1],
-            'longest_contiguous_parent_0': cruns[:, 0],
-            'longest_contiguous_parent_1': cruns[:, 1],
             "n_observed_parent_0": (all_obs == 0).sum(axis=1),
             "n_observed_parent_1": (all_obs == 1).sum(axis=1),
             "n_inferred_parent_0": (hard_states == 0).sum(axis=1),
@@ -555,8 +549,6 @@ if __name__ == "__main__":
     cols = [
         'longest_parent_0',
         'longest_parent_1',
-        'longest_contiguous_parent_0',
-        'longest_contiguous_parent_1',
         "n_observed_parent_0",
         "n_observed_parent_1",
         "n_inferred_parent_0",
