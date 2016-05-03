@@ -464,6 +464,10 @@ def aic(logL, k):
     return 2 * k - 2 * logL
 
 
+def bic(logL, k, n):
+    return - 2 * logL + k * np.log(n)
+
+
 def _longest_runs(runs):
     """
 
@@ -477,7 +481,7 @@ def _longest_runs(runs):
                          for parent in sorted(parents)))
 
 
-def longest_runs(arr)
+def longest_runs(arr):
     runs = list(list((k, len(list(g)))
                      for k, g in groupby(row) if k in (0, 1))
                 for row in arr)
@@ -523,40 +527,60 @@ if __name__ == "__main__":
 
     aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
     aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
+    aic_mins = np.vstack([aic_1s, aic_2s]).min(axis=0)
+    rel_probs1 = np.exp((aic_mins - aic_1s) / 2)
+    rel_probs2 = np.exp((aic_mins - aic_2s) / 2)
+
+    n_obs = np.invert(all_obs.mask).sum(axis=1)
+    bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, n_obs)))
+    bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, n_obs)))
 
     hard_states = (logprobs > 0.5).astype(np.int)
     hard_states.mask = logprobs.mask
 
-    recombined = (aic_2s < aic_1s)
-
     df = pd.DataFrame({
-            'longest_parent_0': runs[:, 0],
-            'longest_parent_1': runs[:, 1],
-            "n_observed_parent_0": (all_obs == 0).sum(axis=1),
-            "n_observed_parent_1": (all_obs == 1).sum(axis=1),
-            "n_inferred_parent_0": (hard_states == 0).sum(axis=1),
-            "n_inferred": np.invert(hard_states.mask).sum(axis=1),
-            "logL1": logP1s,
-            "logL2": logP2s,
-            "AIC1": aic_1s,
-            "AIC2": aic_2s,
-            "recombined_aic": recombined,
-            })
+        'n_obs': n_obs,
+        "n_observed_0": (all_obs == 0).sum(axis=1),
+        "n_observed_1": (all_obs == 1).sum(axis=1),
+        'longest_run_0': runs[:, 0],
+        'longest_run_1': runs[:, 1],
+        "n_inferred": np.invert(hard_states.mask).sum(axis=1),
+        "n_inferred_0": (hard_states == 0).sum(axis=1),
+        "n_inferred_1": (hard_states == 1).sum(axis=1),
+        "k1": k1,
+        "k2": k2,
+        "logL1": logP1s,
+        "logL2": logP2s,
+        "BIC1": bic_1s,
+        "BIC2": bic_2s,
+        "AIC1": aic_1s,
+        "AIC2": aic_2s,
+        "rel_prob1": rel_probs1,
+        "rel_prob2": rel_probs2,
+    })
     cols = [
-        'longest_parent_0',
-        'longest_parent_1',
-        "n_observed_parent_0",
-        "n_observed_parent_1",
-        "n_inferred_parent_0",
+        'n_obs',
+        "n_observed_0",
+        "n_observed_1",
+        'longest_run_0',
+        'longest_run_1',
         "n_inferred",
+        "n_inferred_0",
+        "n_inferred_1",
+        "k1",
+        "k2",
         "logL1",
         "logL2",
+        "BIC1",
+        "BIC2",
         "AIC1",
         "AIC2",
-        "recombined_aic",
+        "rel_prob1",
+        "rel_prob2",
     ]
     df[cols].to_csv("{}-stats.csv".format(outfile), index=False)
 
+    recombined = rel_probs2 > rel_probs1
     print("{} / {} ({:.2f} %) recombined".format(
         recombined.sum(), len(recombined),
         recombined.sum() / len(recombined) * 100))
