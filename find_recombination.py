@@ -518,12 +518,8 @@ if __name__ == "__main__":
     logP1s = np.array(logP1s)
     logP2s = np.array(logP2s)
 
-    if args["--emit"]:
-        k1 = 1
-        k2 = 2
-    else:
-        k1 = 2
-        k2 = 3
+    k1 = 1
+    k2 = 2 if args['--emit'] else 3
 
     aic_1s = np.array(list(aic(logP, k1) for logP in logP1s))
     aic_2s = np.array(list(aic(logP, k2) for logP in logP2s))
