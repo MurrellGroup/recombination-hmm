@@ -17,6 +17,7 @@ Usage:
 Options:
   --fast        Use only differing sites and interpolate
   --constrain   Constrain emission matrix to 1 d.o.f.
+  --ignore-gaps   Ignore all gaps.
   -v --verbose  Print progress
   -h --help     Show this screen
 
@@ -302,7 +303,7 @@ def viterbi_train(observations, S, A, E, constrain=False, max_iters=100):
     return S, A, E
 
 
-def preprocess(parents, child):
+def preprocess(parents, child, ignore_gaps=False):
     """1-hot encoding for which parent each position matches.
 
     `result[i, j]` is True if the child matches parent `j` in position `i`.
@@ -313,13 +314,16 @@ def preprocess(parents, child):
     observation = []
     for i in range(len(child)):
         result = []
-        for j in range(len(parents)):
-            result.append(child[i] == parents[j][i])
+        if ignore_gaps and (child[i] == '-' or any(p[i] == '-' for p in parents)):
+            result.append([0] * len(parents))
+        else:
+            for j in range(len(parents)):
+                result.append(child[i] == parents[j][i])
         observation.append(result)
     return np.vstack(observation)
 
 
-def map_obs(parents, child):
+def map_obs(parents, child, ignore_gaps=False):
     """run `preprocess()`, but then convert 1-hot encoding to binary
     encoding and mask positions where both parents match.
 
@@ -330,10 +334,10 @@ def map_obs(parents, child):
     """
     if len(parents) != 2:
         raise Exception('map_obs() currently only works with two parents')
-    obs = preprocess(parents, child)
+    obs = preprocess(parents, child, ignore_gaps=ignore_gaps)
     result = np.zeros(len(obs))
     result[obs[:, 1]] = 1
-    mask = obs[:, 0] == obs[:, 1]
+    mask = (obs[:, 0] == obs[:, 1])
     start, stop = range_without_gaps(str(child.seq))
     mask[:start] = True
     mask[stop:] = True
@@ -368,7 +372,7 @@ def range_without_gaps(cseq):
     return start, stop
 
 
-def find_recombination(parents, child, constrain=False, fast=False):
+def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=False):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -386,7 +390,7 @@ def find_recombination(parents, child, constrain=False, fast=False):
     cseq = child.seq[start: stop]
     pseqs = list(p.seq[start: stop] for p in parents)
 
-    observation = preprocess(pseqs, cseq)
+    observation = preprocess(pseqs, cseq, ignore_gaps=ignore_gaps)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
     observation[observation.sum(axis=1) == 0, :] = 1
 
@@ -468,26 +472,6 @@ def bic(logL, k, n):
     return - 2 * logL + k * np.log(n)
 
 
-def _longest_runs(runs):
-    """
-
-    >>> list(_longest_runs([(0, 3), (1, 5), (0, 2), (1, 6)]))
-    [3, 6]
-
-    """
-    parents = [0, 1]
-    return np.array(list(max((length for p, length in runs
-                              if p == parent), default=0)
-                         for parent in sorted(parents)))
-
-
-def longest_runs(arr):
-    runs = list(list((k, len(list(g)))
-                     for k, g in groupby(row) if k in (0, 1))
-                for row in arr)
-    return np.vstack(list(_longest_runs(r) for r in runs))
-
-
 if __name__ == "__main__":
     args = docopt(__doc__)
     filename = args["<infile>"]
@@ -500,11 +484,10 @@ if __name__ == "__main__":
 
     if verbose:
         print('computing observations')
-    all_obs = np.ma.vstack(list(map_obs(parents, c)
+    all_obs = np.ma.vstack(list(map_obs(parents, c, ignore_gaps=args['--ignore-gaps'])
                                 for c in progress(children, verbose)))
     np.savetxt("{}-input.txt".format(outfile),
                all_obs.filled(-1), fmt="%.0f", delimiter=",")
-    runs = longest_runs(all_obs)
 
     if verbose:
         print('finding recombination')
@@ -542,8 +525,6 @@ if __name__ == "__main__":
         'n_obs': n_obs,
         "n_observed_0": (all_obs == 0).sum(axis=1),
         "n_observed_1": (all_obs == 1).sum(axis=1),
-        'longest_run_0': runs[:, 0],
-        'longest_run_1': runs[:, 1],
         "n_inferred": np.invert(hard_states.mask).sum(axis=1),
         "n_inferred_0": (hard_states == 0).sum(axis=1),
         "n_inferred_1": (hard_states == 1).sum(axis=1),
@@ -562,8 +543,6 @@ if __name__ == "__main__":
         'n_obs',
         "n_observed_0",
         "n_observed_1",
-        'longest_run_0',
-        'longest_run_1',
         "n_inferred",
         "n_inferred_0",
         "n_inferred_1",
