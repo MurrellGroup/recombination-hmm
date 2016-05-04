@@ -249,6 +249,7 @@ def estimate_from_paths(paths, observations, n_states,
     # count emissions matching state
     e = 0
     for path, obs in zip(paths, observations):
+        obs = obs.astype(np.bool)
         if obs[0].sum() == 1:
             E[path[0], obs[0]] += 1
         if obs[0].sum() == 1 and obs[0, path[0]] == 1:
@@ -261,7 +262,6 @@ def estimate_from_paths(paths, observations, n_states,
                 e += 1
             if obs[i].sum() == 1:
                 E[sink, obs[i]] += 1
-
     # convert to probability
     a = a / (pseudocount + sum(len(p) - 1 for p in paths))
 
