@@ -372,9 +372,8 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
 
     """
     # find and remove terminal gaps in child sequence
-    cseq = str(child.seq)
-    start, stop = range_without_gaps(cseq)
-    cseq = child.seq[start: stop]
+    start, stop = range_without_gaps(child)
+    cseq = child[start: stop]
     pseqs = list(p.seq[start: stop] for p in parents)
 
     observation = preprocess(pseqs, cseq, ignore_gaps=ignore_gaps)
@@ -470,20 +469,26 @@ if __name__ == "__main__":
     parents = reads[:2]
     children = reads[2:]
 
+    unique_children = set(str(c.seq) for c in children)
+    if verbose:
+        print('reduced {} to {} unique'.format(len(children), len(unique_children)))
+
     if verbose:
         print('computing observations')
-    all_obs = np.ma.vstack(list(map_obs(parents, str(c.seq), ignore_gaps=ignore_gaps)
-                                for c in progress(children, verbose)))
+    all_obs_dict = dict((c, map_obs(parents, c, ignore_gaps=ignore_gaps))
+                        for c in progress(unique_children, verbose))
+    all_obs = np.ma.vstack(list(all_obs_dict[str(c.seq)] for c in children))
     np.savetxt("{}-input.txt".format(outfile),
                all_obs.filled(-1), fmt="%.0f", delimiter=",")
 
     if verbose:
         print('finding recombination')
-    results = list(find_recombination(parents, c,
-                                      constrain=args['--constrain'],
-                                      fast=not args['--slow'],
-                                      ignore_gaps=ignore_gaps)
-                   for c in progress(children, verbose))
+    results_dict = dict((c, find_recombination(parents, c,
+                                               constrain=args['--constrain'],
+                                               fast=not args['--slow'],
+                                               ignore_gaps=ignore_gaps))
+                        for c in progress(unique_children, verbose))
+    results = list(results_dict[str(c.seq)] for c in children)
     logprobs, logP2s, logP1s = zip(*results)
     logprobs = np.ma.vstack(logprobs)
 
