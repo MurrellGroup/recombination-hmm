@@ -9,6 +9,7 @@ from find_recombination import estimate_from_paths
 from find_recombination import posterior_logprobs
 from find_recombination import forward, backward
 from find_recombination import precompute_emission
+from find_recombination import viterbi_decode
 
 
 class TestFindRecombination(unittest.TestCase):
@@ -53,6 +54,11 @@ class TestFindRecombination(unittest.TestCase):
                             [1/5, 4/5]])
         assert_allclose(E, [[5/6, 1/6],
                             [1/6, 5/6]])
+
+    def test_decode(self):
+        path = viterbi_decode(self.obs, self.S, self.A, self.E)
+        exp = [0, 0, 1]
+        self.assertEquals(path, exp)
 
     def test_forward(self):
         f = forward(self.obs, self.S, self.A, self.E)
