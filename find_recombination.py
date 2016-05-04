@@ -195,14 +195,13 @@ def get_start(A):
 
 
 def estimate_from_paths(paths, observations, n_states,
-                        n_symbols, constrain=False):
+                        n_symbols, constrain=False, pseudocount=0.1):
     """A single iteration of Viterbi training.
 
     Constrains transition matrix to be symmetric with a constant
     diagonal.
 
     """
-    pseudocount = 0.1
     # count transitions to same state
     a = 0
 
@@ -349,6 +348,12 @@ def logP_single(observation):
 
 
 def range_without_gaps(cseq):
+    """
+
+    >>> range_without_gaps('---ACGTT-')
+    (3, 8)
+
+    """
     pattern = r'[^-]'
     start = re.search(pattern, cseq).start()
     stop = len(cseq) - re.search(pattern, cseq[::-1]).start()
