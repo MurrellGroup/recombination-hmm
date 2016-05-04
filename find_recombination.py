@@ -15,11 +15,11 @@ Usage:
   find_recombination.py -h | --help
 
 Options:
-  --fast        Use only differing sites and interpolate
-  --constrain   Constrain emission matrix to 1 d.o.f.
-  --ignore-gaps   Ignore all gaps.
-  -v --verbose  Print progress
-  -h --help     Show this screen
+  --slow         Use all sites.
+  --constrain    Constrain emission matrix to 1 d.o.f.
+  --use-gaps     Use gaps as informative.
+  -v --verbose   Print progress
+  -h --help      Show this screen
 
 """
 import re
@@ -265,7 +265,7 @@ def viterbi_train(observations, S, A, E, constrain=False, max_iters=100):
     return S, A, E
 
 
-def preprocess(parents, child, ignore_gaps=False):
+def preprocess(parents, child, ignore_gaps=True):
     """1-hot encoding for which parent each position matches.
 
     `result[i, j]` is True if the child matches parent `j` in position `i`.
@@ -294,7 +294,7 @@ def preprocess(parents, child, ignore_gaps=False):
     return result
 
 
-def map_obs(parents, child, ignore_gaps=False):
+def map_obs(parents, child, ignore_gaps=True):
     """run `preprocess()`, but then convert 1-hot encoding to binary
     encoding and mask positions where both parents match.
 
@@ -360,7 +360,7 @@ def range_without_gaps(cseq):
     return start, stop
 
 
-def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=False):
+def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=True):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -445,9 +445,10 @@ def progress(xs, verbose=False):
     n = len(xs)
     for i, x in enumerate(xs):
         if verbose:
-            print("\rprocessing {} / {}".format(i, n), end='')
+            print("\rprocessing {} / {}".format(i + 1, n), end='')
         yield x
-    print("")
+    if verbose:
+        print("")
 
 
 def aic(logL, k):
@@ -463,7 +464,7 @@ if __name__ == "__main__":
     filename = args["<infile>"]
     outfile = args["<outfile>"]
     verbose = args["--verbose"]
-    ignore_gaps = args['--ignore-gaps']
+    ignore_gaps = not args['--use-gaps']
 
     reads = list(SeqIO.parse(filename, 'fasta'))
     parents = reads[:2]
@@ -480,7 +481,7 @@ if __name__ == "__main__":
         print('finding recombination')
     results = list(find_recombination(parents, c,
                                       constrain=args['--constrain'],
-                                      fast=args['--fast'],
+                                      fast=not args['--slow'],
                                       ignore_gaps=ignore_gaps)
                    for c in progress(children, verbose))
     logprobs, logP2s, logP1s = zip(*results)
@@ -506,7 +507,7 @@ if __name__ == "__main__":
     n_positions = list((stop - start) for start, stop in ranges)
 
     n_informative = np.invert(all_obs.mask).sum(axis=1)
-    ns = n_informative if args['--fast'] else n_positions
+    ns = n_informative
     bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
     bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
 
