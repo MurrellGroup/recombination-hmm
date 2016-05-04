@@ -520,6 +520,7 @@ if __name__ == "__main__":
     hard_states.mask = logprobs.mask
 
     df = pd.DataFrame({
+        'label': list(c.id for c in children),
         'n_positions': n_positions,
         'n_informative': n_informative,
         "n_informative_0": (all_obs == 0).sum(axis=1),
@@ -539,6 +540,7 @@ if __name__ == "__main__":
         "rel_prob2": rel_probs2,
     })
     cols = [
+        'label',
         'n_positions',
         'n_informative',
         "n_informative_0",
