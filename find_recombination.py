@@ -351,7 +351,8 @@ def map_obs(parents, child, ignore_gaps=False):
     start, stop = range_without_gaps(str(child.seq))
     mask[:start] = True
     mask[stop:] = True
-    return np.ma.masked_array(result, mask)
+    final = np.ma.masked_array(result, mask)
+    return final
 
 
 def logP_single(observation):
@@ -491,6 +492,7 @@ if __name__ == "__main__":
     filename = args["<infile>"]
     outfile = args["<outfile>"]
     verbose = args["--verbose"]
+    ignore_gaps = args['--ignore-gaps']
 
     reads = list(SeqIO.parse(filename, 'fasta'))
     parents = reads[:2]
@@ -498,7 +500,7 @@ if __name__ == "__main__":
 
     if verbose:
         print('computing observations')
-    all_obs = np.ma.vstack(list(map_obs(parents, c, ignore_gaps=args['--ignore-gaps'])
+    all_obs = np.ma.vstack(list(map_obs(parents, c, ignore_gaps=ignore_gaps)
                                 for c in progress(children, verbose)))
     np.savetxt("{}-input.txt".format(outfile),
                all_obs.filled(-1), fmt="%.0f", delimiter=",")
@@ -507,7 +509,8 @@ if __name__ == "__main__":
         print('finding recombination')
     results = list(find_recombination(parents, c,
                                       constrain=args['--constrain'],
-                                      fast=args['--fast'])
+                                      fast=args['--fast'],
+                                      ignore_gaps=ignore_gaps)
                    for c in progress(children, verbose))
     logprobs, logP2s, logP1s = zip(*results)
     logprobs = np.ma.vstack(logprobs)
