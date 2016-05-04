@@ -309,10 +309,10 @@ def preprocess(parents, child, ignore_gaps=False):
     `result[i, j]` is True if the child matches parent `j` in position `i`.
 
     >>> list(preprocess(['AAA', 'AAC'], 'ATA', ignore_gaps=False))
-    [array([True, True]), array([False, False]), array([True, False])]
+    [array([1, 1]), array([1, 1]), array([1, 0])]
 
     >>> list(preprocess(['A-A', 'AAC'], 'A-A', ignore_gaps=True))
-    [array([True, True]), array([False, False]), array([True, False])]
+    [array([1, 1]), array([1, 1]), array([1, 0])]
 
     """
     parents = list(p.upper() for p in parents)
@@ -325,8 +325,11 @@ def preprocess(parents, child, ignore_gaps=False):
         else:
             for j in range(len(parents)):
                 result.append(child[i] == parents[j][i])
-        observation.append(np.array(result, dtype=np.bool))
-    return np.vstack(observation)
+        observation.append(np.array(result, dtype=np.int))
+    result = np.vstack(observation)
+    # re-encode all 0s as all 1s; i.e. maximally uninformative
+    result[result.sum(axis=1) == 0, :] = 1
+    return result
 
 
 def map_obs(parents, child, ignore_gaps=False):
@@ -342,7 +345,8 @@ def map_obs(parents, child, ignore_gaps=False):
         raise Exception('map_obs() currently only works with two parents')
     obs = preprocess(parents, child, ignore_gaps=ignore_gaps)
     result = np.zeros(len(obs), dtype=np.int)
-    result[obs[:, 1]] = 1
+    positions = np.array((obs.sum(axis=1) == 1) & (obs[:, 1] == 1))
+    result[positions] = 1
     mask = (obs[:, 0] == obs[:, 1])
     start, stop = range_without_gaps(str(child.seq))
     mask[:start] = True
@@ -355,14 +359,20 @@ def logP_single(observation):
 
     Only considers (0, 1) or (1, 0) positions.
 
+    >>> logP_single(np.array([[0, 1], [0, 1]]))
+    0
+
+    >>> logP_single(np.array([[0, 1], [1, 0]]))
+    -1.3862943611198906
+
     """
     n = 0
     N = 0
     for i in range(len(observation)):
-        if np.all(observation[i] == np.array([True, False])):
+        if np.all(observation[i] == np.array([1, 0])):
             n += 1
             N += 1
-        elif np.all(observation[i] == np.array([False, True])):
+        elif np.all(observation[i] == np.array([0, 1])):
             N += 1
     if n == N or n == 0:
         return 0
@@ -396,8 +406,6 @@ def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=
     pseqs = list(p.seq[start: stop] for p in parents)
 
     observation = preprocess(pseqs, cseq, ignore_gaps=ignore_gaps)
-    # re-encode all 0s as all 1s; i.e. maximally uninformative
-    observation[observation.sum(axis=1) == 0, :] = 1
 
     # now each individual observation is either (0, 1), (1, 0), or
     # (1, 1). The idea is that when the observation is (1, 1), the
@@ -405,7 +413,6 @@ def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=
     # contribute to the log probability at all.
 
     if fast:
-        # keep only differing parts
         positions = np.where(observation.sum(axis=1) == 1)[0]
         observation = observation[positions]
 
@@ -457,7 +464,9 @@ def find_recombination(parents, child, constrain=False, fast=False, ignore_gaps=
         if child[i] == '-':
             if set(p[i] for p in parents) == set('-'):
                 mask[i] = True
-    return np.ma.masked_array(full_result, mask), logP2, logP1
+
+    final = np.ma.masked_array(full_result, mask)
+    return final, logP2, logP1
 
 
 def progress(xs, verbose=False):
