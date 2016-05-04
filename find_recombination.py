@@ -67,9 +67,10 @@ def _check_matrices(obs, S, A, E):
     if not np.allclose(np.sum(E, axis=1), 1):
         raise Exception('Emission probabilities do not sum to 1.')
 
-    if np.max(obs) > n_symbols:
-        raise Exception('Observation contains an invalid state:'
-                        ' {}'.format(np.max(obs)))
+    if obs.shape[1] != n_symbols:
+        raise Exception('Observation contains wrong number of states')
+    if obs.dtype != np.bool:
+        raise Exception('Observation is not a boolean array')
 
 
 def precompute_emission(logemission):
@@ -193,44 +194,6 @@ def get_start(A):
     return S
 
 
-def baumwelch_train(observations, S, A, E):
-    """Unconstrained Baum-Welch"""
-    return NotImplementedError('not updated to deal with 1 of k encoding')
-    while True:
-        # implicit pseudocount of 1
-        A_new = np.zeros_like(A)
-        E_new = np.zeros_like(E)
-        S_log = np.log(S)
-        A_log = np.log(A)
-        E_log = np.log(E)
-        for obs in observations:
-            f = forward(obs, S, A, E)
-            b = backward(obs, S, A, E)
-            logP = logsumexp(f[:, -1])
-            for source in range(A.shape[0]):
-                for sink in range(A.shape[1]):
-                    val = logsumexp(list(f[source, pos] + A_log[source, sink] + \
-                                         E_log[sink, obs[pos + 1]] + b[sink, pos + 1]
-                                         for pos in range(len(obs) - 1)))
-                    A_new[source, sink] = logsumexp([A_new[source, sink], val - logP])
-            for state in range(E.shape[0]):
-                for symbol in range(E.shape[1]):
-                    if symbol in obs:
-                        val = logsumexp(list(f[state, pos] + b[state, pos]
-                                             for pos in range(len(obs)) if obs[pos] == symbol))
-                        E_new[state, symbol] = logsumexp([E_new[state, symbol], val - logP])
-        A_new = np.exp(A_new)
-        E_new = np.exp(A_new)
-        A_new = A_new / A_new.sum(axis=1).reshape((-1, 1))
-        E_new = E_new / E_new.sum(axis=1).reshape((-1, 1))
-        S = get_start(A_new)
-        if np.allclose(A_new, A) and np.allclose(E_new, E):
-            break
-        A = A_new
-        E = E_new
-    return S, A_new, E_new
-
-
 def estimate_from_paths(paths, observations, n_states,
                         n_symbols, constrain=False):
     """A single iteration of Viterbi training.
@@ -249,7 +212,7 @@ def estimate_from_paths(paths, observations, n_states,
     # count emissions matching state
     e = 0
     for path, obs in zip(paths, observations):
-        obs = obs.astype(np.bool)
+        assert obs.dtype == np.bool
         if obs[0].sum() == 1:
             E[path[0], obs[0]] += 1
         if obs[0].sum() == 1 and obs[0, path[0]] == 1:
@@ -308,11 +271,11 @@ def preprocess(parents, child, ignore_gaps=False):
 
     `result[i, j]` is True if the child matches parent `j` in position `i`.
 
-    >>> list(preprocess(['AAA', 'AAC'], 'ATA', ignore_gaps=False))
-    [array([1, 1]), array([1, 1]), array([1, 0])]
+    >>> list(preprocess(['AAA', 'AAC'], 'ATA', ignore_gaps=False).ravel())
+    [True, True, True, True, True, False]
 
-    >>> list(preprocess(['A-A', 'AAC'], 'A-A', ignore_gaps=True))
-    [array([1, 1]), array([1, 1]), array([1, 0])]
+    >>> list(preprocess(['A-A', 'AAC'], 'A-A', ignore_gaps=True).ravel())
+    [True, True, True, True, True, False]
 
     """
     parents = list(p.upper() for p in parents)
@@ -321,14 +284,14 @@ def preprocess(parents, child, ignore_gaps=False):
     for i in range(len(child)):
         result = []
         if ignore_gaps and (child[i] == '-' or any(p[i] == '-' for p in parents)):
-            result.append([0] * len(parents))
+            result.append([False] * len(parents))
         else:
             for j in range(len(parents)):
                 result.append(child[i] == parents[j][i])
-        observation.append(np.array(result, dtype=np.int))
+        observation.append(np.array(result, dtype=np.bool))
     result = np.vstack(observation)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
-    result[result.sum(axis=1) == 0, :] = 1
+    result[~result[:, 0] & ~result[:, 1]] = True
     return result
 
 
@@ -340,15 +303,18 @@ def map_obs(parents, child, ignore_gaps=False):
 
     Only works for two parents.
 
+    >>> list(map_obs(['A-AA', 'AACT'], 'A-AT', ignore_gaps=True).filled(-1))
+    [-1, -1, 0, 1]
+
     """
     if len(parents) != 2:
         raise Exception('map_obs() currently only works with two parents')
     obs = preprocess(parents, child, ignore_gaps=ignore_gaps)
     result = np.zeros(len(obs), dtype=np.int)
-    positions = np.array((obs.sum(axis=1) == 1) & (obs[:, 1] == 1))
-    result[positions] = 1
+    positions = np.array(~obs[:, 0] & obs[:, 1])
+    result[positions] = True
     mask = (obs[:, 0] == obs[:, 1])
-    start, stop = range_without_gaps(str(child.seq))
+    start, stop = range_without_gaps(child)
     mask[:start] = True
     mask[stop:] = True
     final = np.ma.masked_array(result, mask)
@@ -500,7 +466,7 @@ if __name__ == "__main__":
 
     if verbose:
         print('computing observations')
-    all_obs = np.ma.vstack(list(map_obs(parents, c, ignore_gaps=ignore_gaps)
+    all_obs = np.ma.vstack(list(map_obs(parents, str(c.seq), ignore_gaps=ignore_gaps)
                                 for c in progress(children, verbose)))
     np.savetxt("{}-input.txt".format(outfile),
                all_obs.filled(-1), fmt="%.0f", delimiter=",")
