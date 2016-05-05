@@ -374,7 +374,7 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
     # find and remove terminal gaps in child sequence
     start, stop = range_without_gaps(child)
     cseq = child[start: stop]
-    pseqs = list(p.seq[start: stop] for p in parents)
+    pseqs = list(p[start: stop] for p in parents)
 
     observation = preprocess(pseqs, cseq, ignore_gaps=ignore_gaps)
 
@@ -442,10 +442,10 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
 
 def progress(xs, verbose=False):
     n = len(xs)
-    for i, x in enumerate(xs):
+    for i, (k, v) in enumerate(xs.items()):
         if verbose:
             print("\rprocessing {} / {}".format(i + 1, n), end='')
-        yield x
+        yield k, v
     if verbose:
         print("")
 
@@ -465,35 +465,35 @@ if __name__ == "__main__":
     verbose = args["--verbose"]
     ignore_gaps = not args['--use-gaps']
 
-    reads = list(SeqIO.parse(filename, 'fasta'))
-    parents = reads[:2]
-    children = reads[2:]
+    records = list(SeqIO.parse(filename, 'fasta'))
+    children = records[::3]
+    parent_0s = records[1::3]
+    parent_1s = records[2::3]
 
-    unique_children = set(str(c.seq) for c in children)
+    cdict = {}
+    for c, p0, p1 in zip(children, parent_0s, parent_1s):
+        key = str(c.seq)
+        if key not in cdict:
+            cdict[key] = (str(p0.seq), str(p1.seq))
+
     if verbose:
-        print('reduced {} to {} unique'.format(len(children), len(unique_children)))
+        print('reduced {} to {} unique'.format(len(children), len(cdict)))
 
     if verbose:
         print('computing observations')
-    all_obs_dict = dict((c, map_obs(parents, c, ignore_gaps=ignore_gaps))
-                        for c in progress(unique_children, verbose))
-    all_obs = np.ma.vstack(list(all_obs_dict[str(c.seq)] for c in children))
-    np.savetxt("{}-input.txt".format(outfile),
-               all_obs.filled(-1), fmt="%.0f", delimiter=",")
+    all_obs_dict = dict((child, map_obs(parents, child, ignore_gaps=ignore_gaps))
+                        for child, parents in progress(cdict, verbose))
+    all_obs = list(all_obs_dict[str(c.seq)] for c in children)
 
     if verbose:
         print('finding recombination')
-    results_dict = dict((c, find_recombination(parents, c,
+    results_dict = dict((child, find_recombination(parents, child,
                                                constrain=args['--constrain'],
                                                fast=not args['--slow'],
                                                ignore_gaps=ignore_gaps))
-                        for c in progress(unique_children, verbose))
+                        for child, parents in progress(cdict, verbose))
     results = list(results_dict[str(c.seq)] for c in children)
     logprobs, logP2s, logP1s = zip(*results)
-    logprobs = np.ma.vstack(logprobs)
-
-    np.savetxt("{}-logprobs.txt".format(outfile),
-               logprobs.filled(-1), fmt="%.4f", delimiter=",")
 
     # write statistics
     logP1s = np.array(logP1s)
@@ -508,26 +508,26 @@ if __name__ == "__main__":
     rel_probs1 = np.exp((aic_mins - aic_1s) / 2)
     rel_probs2 = np.exp((aic_mins - aic_2s) / 2)
 
-    ranges = list(range_without_gaps(str(c.seq)) for c in children)
-    n_positions = list((stop - start) for start, stop in ranges)
-
-    n_informative = np.invert(all_obs.mask).sum(axis=1)
+    n_informative = list(np.invert(o.mask).sum() for o in all_obs)
     ns = n_informative
     bic_1s = np.array(list(bic(logP, k1, n) for logP, n in zip(logP1s, ns)))
     bic_2s = np.array(list(bic(logP, k2, n) for logP, n in zip(logP2s, ns)))
 
-    hard_states = (logprobs > 0.5).astype(np.int)
-    hard_states.mask = logprobs.mask
+    hard_states = []
+    for ps in logprobs:
+        hard = (ps > 0.5).astype(np.int)
+        hard.mask = ps.mask
+        hard_states.append(hard)
 
     df = pd.DataFrame({
         'label': list(c.id for c in children),
-        'n_positions': n_positions,
+        'n_positions': list(len(c) for c in children),
         'n_informative': n_informative,
-        "n_informative_0": (all_obs == 0).sum(axis=1),
-        "n_informative_1": (all_obs == 1).sum(axis=1),
-        "n_inferred": np.invert(hard_states.mask).sum(axis=1),
-        "n_inferred_0": (hard_states == 0).sum(axis=1),
-        "n_inferred_1": (hard_states == 1).sum(axis=1),
+        "n_informative_0": list((o == 0).sum() for o in all_obs),
+        "n_informative_1": list((o == 1).sum() for o in all_obs),
+        "n_inferred": list(np.invert(h.mask).sum() for h in hard_states),
+        "n_inferred_0": list((h == 0).sum() for h in hard_states),
+        "n_inferred_1": list((h == 1).sum() for h in hard_states),
         "k1": k1,
         "k2": k2,
         "logL1": logP1s,

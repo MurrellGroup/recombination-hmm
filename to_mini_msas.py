@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
         # remove point insertions
         aligned_parents = list(''.join(remove_insertions(p, s)) for s, p in trimmed)
+        result.append(new_record_seq_str(pairs[0][0], seq))
         result.extend(list(new_record_seq_str(p, new_seq)
                            for (s, p), new_seq in zip(pairs, aligned_parents)))
-        result.append(new_record_seq_str(pairs[0][0], seq))
     SeqIO.write(result, outfile, 'fasta')
