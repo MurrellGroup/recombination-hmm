@@ -157,18 +157,20 @@ if __name__ == "__main__":
     for s, r in zip(seq_records, ref_records):
         if len(s) != len(r):
             raise Exception('sequences are not aligned')
-    # if not len(set(s.id for s in seq_records)) == len(seq_records):
-    #     raise Exception('non-unique sequence ids')
+    if not len(set(s.id for s in seq_records)) == len(seq_records):
+        raise Exception('non-unique sequence ids')
 
     seqs = list(str(s.seq) for s in seq_records)
     refs = list(str(r.seq) for r in ref_records)
     pairs = list(zip(seqs, refs))
-    full_seq_dict = dict((s.id, str(s.seq)) for s in full_seq_records)
+    full_seq_dict = dict((s.id, s) for s in full_seq_records)
     full_seqs = list(full_seq_dict[s.id] for s in seq_records)
+    full_seqs = list(s.reverse_complement() if strand == '-' else s
+                     for s, strand in zip(full_seqs, strands))
 
     if verbose:
         print("restoring terminal indels")
-    extended = list(restore_terminal_indels(seq, ref, caln, full_seq, reference, restore_insertions)
+    extended = list(restore_terminal_indels(seq, ref, caln, str(full_seq.seq), reference, restore_insertions)
                     for (seq, ref), caln, full_seq in progress(zip(pairs, calns, full_seqs), verbose))
 
     if not all(ungap(r) == reference for (_, r) in extended):
