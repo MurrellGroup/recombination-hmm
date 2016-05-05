@@ -45,6 +45,8 @@ def _check_matrices(obs, S, A, E):
     E: emission matrix. shape: (n_states, n_symbols)
 
     """
+    if len(obs) == 0:
+        raise Exception('observation is empty')
     S = S.ravel()
     n_states = A.shape[0]
     n_symbols = E.shape[1]
