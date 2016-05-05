@@ -87,6 +87,11 @@ if __name__ == "__main__":
     for seq, parent in zip(records[::2], records[1::2]):
         seqdict[seq.id].append((seq, parent))
 
+    n_parents = max(len(v) for v in seqdict.values())
+    missing_parents = list(k for k, v in seqdict.iteritems() if len(v) < n_parents)
+    if missing_parents:
+        raise Exception('some sequences are missing some parents')
+
     result = []
     for label, pairs in seqdict.items():
         if len(set(p.id for s, p in pairs)) < len(pairs):
