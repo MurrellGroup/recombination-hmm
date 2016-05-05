@@ -265,15 +265,15 @@ def viterbi_train(observations, S, A, E, constrain=False, max_iters=100):
     return S, A, E
 
 
-def preprocess(parents, child, ignore_gaps=True):
+def make_observation(child, parents, ignore_gaps=True):
     """1-hot encoding for which parent each position matches.
 
     `result[i, j]` is True if the child matches parent `j` in position `i`.
 
-    >>> list(preprocess(['AAA', 'AAC'], 'ATA', ignore_gaps=False).ravel())
+    >>> list(make_observation('ATA', ['AAA', 'AAC'], ignore_gaps=False).ravel())
     [True, True, True, True, True, False]
 
-    >>> list(preprocess(['A-A', 'AAC'], 'A-A', ignore_gaps=True).ravel())
+    >>> list(make_observation('A-A', ['A-A', 'AAC'], ignore_gaps=True).ravel())
     [True, True, True, True, True, False]
 
     """
@@ -293,32 +293,32 @@ def preprocess(parents, child, ignore_gaps=True):
         observation.append(np.array(result, dtype=np.bool))
     result = np.vstack(observation)
     # re-encode all 0s as all 1s; i.e. maximally uninformative
+    # now each individual observation is either (0, 1), (1, 0), or
+    # (1, 1). The idea is that when the observation is (1, 1), the
+    # emission probability will be e + (1 - e) == 1, so it will not
+    # contribute to the log probability at all.
     result[~result[:, 0] & ~result[:, 1]] = True
     return result
 
 
-def map_obs(parents, child, ignore_gaps=True):
-    """run `preprocess()`, but then convert 1-hot encoding to binary
+def collapse_observation(observation, parents, ignore_gaps=True):
+    """run `make_observation()`, but then convert 1-hot encoding to binary
     encoding and mask positions where both parents match.
 
     Also mask terminal gaps.
 
     Only works for two parents.
 
-    >>> list(map_obs(['A-AA', 'AACT'], 'A-AT', ignore_gaps=True).filled(-1))
+    >>> list(collapse_observation(make_observation('A-AT', ['A-AA', 'AACT']), ['A-AA', 'AACT'], ignore_gaps=True).filled(-1))
     [-1, -1, 0, 1]
 
     """
     if len(parents) != 2:
-        raise Exception('map_obs() currently only works with two parents')
-    obs = preprocess(parents, child, ignore_gaps=ignore_gaps)
-    result = np.zeros(len(obs), dtype=np.int)
-    positions = np.array(~obs[:, 0] & obs[:, 1])
+        raise Exception('collapse_observation() currently only works with two parents')
+    result = np.zeros(len(observation), dtype=np.int)
+    positions = np.array(~observation[:, 0] & observation[:, 1])
     result[positions] = True
-    mask = (obs[:, 0] == obs[:, 1])
-    start, stop = range_without_gaps(child)
-    mask[:start] = True
-    mask[stop:] = True
+    mask = (observation[:, 0] == observation[:, 1])
     final = np.ma.masked_array(result, mask)
     return final
 
@@ -350,20 +350,8 @@ def logP_single(observation):
     return n * np.log(p) + (N - n) * np.log(q)
 
 
-def range_without_gaps(cseq):
-    """
-
-    >>> range_without_gaps('---ACGTT-')
-    (3, 8)
-
-    """
-    pattern = r'[^-]'
-    start = re.search(pattern, cseq).start()
-    stop = len(cseq) - re.search(pattern, cseq[::-1]).start()
-    return start, stop
-
-
-def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=True):
+def find_recombination(observation, parents, child, constrain=False,
+                       fast=True, ignore_gaps=True):
     """Run the model on a child sequence.
 
     Extracts relevent positions, trains a model using Viterbi
@@ -374,18 +362,6 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
     Gaps in all three sequences are masked.
 
     """
-    # find and remove terminal gaps in child sequence
-    start, stop = range_without_gaps(child)
-    cseq = child[start: stop]
-    pseqs = list(p[start: stop] for p in parents)
-
-    observation = preprocess(pseqs, cseq, ignore_gaps=ignore_gaps)
-
-    # now each individual observation is either (0, 1), (1, 0), or
-    # (1, 1). The idea is that when the observation is (1, 1), the
-    # emission probability will be e + (1 - e) == 1, so it will not
-    # contribute to the log probability at all.
-
     if fast:
         positions = np.where(observation.sum(axis=1) == 1)[0]
         observation = observation[positions]
@@ -406,7 +382,7 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
     if fast:
         # now interpolate back
         # probability that position came from parent 1
-        result = np.zeros(len(cseq))
+        result = np.zeros(len(child))
         # fill first part
         result[:positions[0]] = probs[1, 0]
 
@@ -424,31 +400,22 @@ def find_recombination(parents, child, constrain=False, fast=True, ignore_gaps=T
     else:
         result = probs[1, :]
 
-    # map back to full alignment coordinates
-    full_result = np.zeros(len(child))
-    full_result[start:stop] = result
-
     # mask terminal gaps, and gaps that are shared by all three
-    mask = np.zeros(len(full_result), dtype=np.bool)
-    for i in range(len(full_result)):
-        if i < start:
+    mask = np.zeros(len(result), dtype=np.bool)
+    for i in range(len(result)):
+        if child[i] == '-' and set(p[i] for p in parents) == set('-'):
             mask[i] = True
-        if i >= stop:
-            mask[i] = True
-        if child[i] == '-':
-            if set(p[i] for p in parents) == set('-'):
-                mask[i] = True
-
-    final = np.ma.masked_array(full_result, mask)
+    final = np.ma.masked_array(result, mask)
     return final, logP2, logP1
 
 
 def progress(xs, verbose=False):
+    xs = list(xs)
     n = len(xs)
-    for i, (k, v) in enumerate(xs.items()):
+    for i, x in enumerate(xs):
         if verbose:
-            print("\rprocessing {} / {}".format(i + 1, n), end='')
-        yield k, v
+            print("\r\tprocessing {} / {}".format(i + 1, n), end='')
+        yield x
     if verbose:
         print("")
 
@@ -473,28 +440,32 @@ if __name__ == "__main__":
     parent_0s = records[1::3]
     parent_1s = records[2::3]
 
+    if verbose:
+        print('computing observations')
     cdict = {}
-    for c, p0, p1 in zip(children, parent_0s, parent_1s):
+    for c, p0, p1 in progress(zip(children, parent_0s, parent_1s), verbose):
         key = str(c.seq)
         if key not in cdict:
-            cdict[key] = (str(p0.seq), str(p1.seq))
+            parents = [str(p0.seq), str(p1.seq)]
+            observation = make_observation(key, parents, ignore_gaps=ignore_gaps)
+            cdict[key] = (observation, parents)
 
     if verbose:
         print('reduced {} to {} unique'.format(len(children), len(cdict)))
 
     if verbose:
-        print('computing observations')
-    all_obs_dict = dict((child, map_obs(parents, child, ignore_gaps=ignore_gaps))
-                        for child, parents in progress(cdict, verbose))
+        print('collapsing observations')
+    all_obs_dict = dict((child, collapse_observation(obs, parents, ignore_gaps=ignore_gaps))
+                        for child, (obs, parents) in progress(cdict.items(), verbose))
     all_obs = list(all_obs_dict[str(c.seq)] for c in children)
 
     if verbose:
         print('finding recombination')
-    results_dict = dict((child, find_recombination(parents, child,
-                                               constrain=args['--constrain'],
-                                               fast=not args['--slow'],
-                                               ignore_gaps=ignore_gaps))
-                        for child, parents in progress(cdict, verbose))
+    results_dict = dict((child, find_recombination(obs, parents, child,
+                                                   constrain=args['--constrain'],
+                                                   fast=not args['--slow'],
+                                                   ignore_gaps=ignore_gaps))
+                        for child, (obs, parents) in progress(cdict.items(), verbose))
     results = list(results_dict[str(c.seq)] for c in children)
     logprobs, logP2s, logP1s = zip(*results)
 
