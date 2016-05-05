@@ -90,7 +90,9 @@ if __name__ == "__main__":
     n_parents = max(len(v) for v in seqdict.values())
     missing_parents = list(k for k, v in seqdict.items() if len(v) < n_parents)
     if missing_parents:
-        raise Exception('some sequences are missing some parents')
+        print('{} sequences are missing some parents'.format(len(missing_parents)))
+    for k in missing_parents:
+        del seqdict[k]
 
     result = []
     for label, pairs in seqdict.items():
