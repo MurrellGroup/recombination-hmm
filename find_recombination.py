@@ -277,6 +277,9 @@ def preprocess(parents, child, ignore_gaps=True):
     [True, True, True, True, True, False]
 
     """
+    aln_len = len(child)
+    if not all(len(p) == aln_len for p in parents):
+        raise Exception('parents and child are not aligned')
     parents = list(p.upper() for p in parents)
     child = child.upper()
     observation = []
