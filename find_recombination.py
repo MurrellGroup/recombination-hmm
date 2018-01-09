@@ -2,24 +2,25 @@
 
 """Infer recombination from two parent sequences to one child.
 
-Input: a FASTA file containing aligned sequences. The first two are
-the parents, and the rest are children.
+Input: a FASTA file containing aligned parent and child sequences. If
+given the `--share-parents` flag, the first two are the parents, and
+the rest children. Otherwise, triplets where the first two are parents
+and the third is the child.
 
 Output: Probability that each position came from the second
-parent. Gaps are coded as -1.
-
-Also creates image files.
+parent. Gaps are coded as -1. Also some statistics.
 
 Usage:
   find_recombination.py [options] <infile> <outfile>
   find_recombination.py -h | --help
 
 Options:
-  --slow         Use all sites.
-  --constrain    Constrain emission matrix to 1 d.o.f.
-  --use-gaps     Use gaps as informative.
-  -v --verbose   Print progress
-  -h --help      Show this screen
+  --slow           Use all sites.
+  --constrain      Constrain emission matrix to 1 d.o.f.
+  --use-gaps       Use gaps as informative.
+  --share-parents  Use first two sequences as parents
+  -v --verbose     Print progress
+  -h --help        Show this screen
 
 """
 import re
@@ -383,7 +384,7 @@ def find_recombination(observation, parents, child, constrain=False,
 
     if fast:
         # now interpolate back
-        # probability that position came from parent 1
+        # probability that position came from the second parent
         result = np.zeros(len(child))
         # fill first part
         result[:positions[0]] = probs[1, 0]
@@ -438,9 +439,14 @@ if __name__ == "__main__":
     ignore_gaps = not args['--use-gaps']
 
     records = list(SeqIO.parse(filename, 'fasta'))
-    children = records[::3]
-    parent_0s = records[1::3]
-    parent_1s = records[2::3]
+    if args['--share-parents']:
+        children = records[2:]
+        parent_0s = (records[0] for _ in range(len(children)))
+        parent_1s = (records[1] for _ in range(len(children)))
+    else:
+        children = records[::3]
+        parent_0s = records[1::3]
+        parent_1s = records[2::3]
 
     if verbose:
         print('computing observations')
@@ -470,6 +476,13 @@ if __name__ == "__main__":
                         for child, (obs, parents) in progress(cdict.items(), verbose))
     results = list(results_dict[str(c.seq)] for c in children)
     logprobs, logP2s, logP1s = zip(*results)
+
+    # write probability of first parent for each position
+    np.set_printoptions(threshold=np.nan)
+    result_str = '\n'.join(list(np.array_repr(x.filled(-1), precision=4).replace('\n', '').replace(' ', '').replace(',', ', ')
+                                for x in logprobs))
+    with open("{}.txt".format(outfile), 'w') as handle:
+        handle.write(result_str)
 
     # write statistics
     logP1s = np.array(logP1s)
