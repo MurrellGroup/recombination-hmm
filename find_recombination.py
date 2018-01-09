@@ -479,8 +479,11 @@ if __name__ == "__main__":
 
     # write probability of first parent for each position
     np.set_printoptions(threshold=np.nan)
-    result_str = '\n'.join(list(np.array_repr(x.filled(-1), precision=4).replace('\n', '').replace(' ', '').replace(',', ', ')
-                                for x in logprobs))
+    result_strs = list(np.array_repr(x.filled(-1), precision=4)
+                       for x in logprobs)
+    result_str = '\n'.join(list(s.replace('\n', '').replace(' ', '').replace(',', ', ')[len('array(['):-len('])')]
+                                for s in result_strs))
+
     with open("{}.txt".format(outfile), 'w') as handle:
         handle.write(result_str)
 
